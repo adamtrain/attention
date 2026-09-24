@@ -52,6 +52,7 @@ def commands(lab: Lab) -> Table:
     grid.add_row("attention train", "train a new one (try --corpus names, or your own list)")
     grid.add_row("attention info", "everything about your model")
     grid.add_row("attention tour", "take the tour again")
+    grid.add_row("attention clean", "delete your model when you're done with it")
     return grid
 
 

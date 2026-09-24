@@ -1,5 +1,6 @@
 import re
 
+import numpy as np
 from typer.testing import CliRunner
 
 from attention.cli import app
@@ -61,3 +62,51 @@ def test_the_tour_runs_without_a_keyboard():
     result = runner.invoke(app, ["tour", "--corpus", "towns", "--seed", "2"])
     assert result.exit_code == 0, result.output
     assert "Thanks for taking the tour" in plain(result.output)
+
+
+def test_clean_with_nothing_saved():
+    result = runner.invoke(app, ["clean"])
+    assert result.exit_code == 0
+    assert "Nothing to clean up" in plain(result.output)
+
+
+def test_clean_asks_first_then_deletes_the_model_and_its_folder(model_home):
+    runner.invoke(app, ["train", "--corpus", "towns", "--seed", "2", "--fast"])
+    path = model_home / "model.npz"
+    assert path.exists()
+
+    result = runner.invoke(app, ["clean"], input="n\n")
+    assert path.exists()
+    assert "Nothing deleted" in plain(result.output)
+
+    result = runner.invoke(app, ["clean"], input="y\n")
+    assert result.exit_code == 0
+    assert "Deleted 1 file" in plain(result.output)
+    assert not model_home.exists()
+
+
+def test_clean_leaves_everything_else_alone(model_home):
+    runner.invoke(app, ["train", "--corpus", "names", "--seed", "4", "--fast"])
+    (model_home / "notes.txt").write_text("mine")
+    (model_home / "model.npz.tmp.npz").write_bytes(b"half-written")
+    result = runner.invoke(app, ["clean", "--yes"])
+    assert result.exit_code == 0
+    assert sorted(p.name for p in model_home.iterdir()) == ["notes.txt"]
+    assert "Left" in plain(result.output)
+
+
+def test_clean_only_deletes_attention_models(tmp_path):
+    precious = tmp_path / "precious.npz"
+    np.savez(precious, x=np.zeros(3))
+    result = runner.invoke(app, ["clean", "--yes", "--model", str(precious)])
+    assert result.exit_code == 1
+    assert precious.exists()
+
+    elsewhere = tmp_path / "mine.npz"
+    runner.invoke(
+        app, ["train", "--corpus", "names", "--seed", "3", "--fast", "--model", str(elsewhere)]
+    )
+    assert elsewhere.exists()
+    result = runner.invoke(app, ["clean", "--yes", "--model", str(elsewhere)])
+    assert result.exit_code == 0
+    assert not elsewhere.exists()

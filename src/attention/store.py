@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import zipfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -72,10 +73,49 @@ def save(path: Path, saved: Saved) -> Path:
         "words": "\n".join(saved.words),
     }
     arrays = {f"param/{k}": v for k, v in saved.model.params.items()}
-    tmp = path.with_name(path.name + ".tmp.npz")
+    tmp = unfinished(path)
     np.savez_compressed(tmp, meta=np.array(json.dumps(meta)), **arrays)  # ty: ignore[invalid-argument-type]
     tmp.replace(path)
     return path
+
+
+def unfinished(path: Path) -> Path:
+    """Where a save is written first, before it replaces the real file in one go."""
+    return path.with_name(path.name + ".tmp.npz")
+
+
+def is_model(path: Path) -> bool:
+    """Is this a model attention saved? (It has attention's card inside.)"""
+    try:
+        with np.load(path, allow_pickle=False) as f:
+            return "meta" in f.files and "card" in json.loads(str(f["meta"]))
+    except (OSError, ValueError, KeyError, EOFError, zipfile.BadZipFile):
+        return False
+
+
+def leftovers(extra: Path | None = None) -> list[Path]:
+    """Everything attention has saved: models and unfinished saves in its folder, and `extra`."""
+    found: list[Path] = []
+    folder = home()
+    if folder.is_dir():
+        found += sorted(
+            p for p in folder.iterdir()
+            if p.is_file() and (p.name.endswith(".tmp.npz") or is_model(p))
+        )  # fmt: skip
+    if extra is not None:
+        found += [p for p in (extra, unfinished(extra)) if p.is_file() and p not in found]
+    return found
+
+
+def remove(paths: list[Path]) -> bool:
+    """Delete these files, then attention's folder if that left it empty. Was it removed?"""
+    for path in paths:
+        path.unlink(missing_ok=True)
+    folder = home()
+    if folder.is_dir() and not any(folder.iterdir()):
+        folder.rmdir()
+        return True
+    return False
 
 
 def load(path: Path) -> Saved:

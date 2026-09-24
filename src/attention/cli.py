@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -21,7 +22,7 @@ from .explain import influence, nudge
 from .generate import Pick, invent
 from .keys import Keys
 from .model import softmax
-from .store import Saved, default_path, load
+from .store import Saved, default_path, home, is_model, leftovers, load, remove
 from .tour.lab import Lab
 from .tour.pretraining import summary, tidy
 from .tour.stage import THEME, Stage
@@ -445,6 +446,81 @@ def show_info(console: Console, saved: Saved, path: Path) -> None:
             )
         )
     console.print()
+
+
+@app.command()
+def clean(
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Delete without asking first.")] = False,
+    model: Annotated[
+        Path | None,
+        typer.Option(
+            "--model", "-m", help="Also delete a model saved somewhere else.", show_default=False
+        ),
+    ] = None,
+) -> None:
+    """Delete everything attention has saved: your model, and its folder if that empties it."""
+    if model is not None and model.exists() and not is_model(model):
+        raise fail(f"{tidy(model)} isn't an attention model, so it's staying put.")
+    doomed = leftovers(model)
+    folder = home()
+    out.print()
+    if not doomed:
+        gone = remove([])  # an empty folder of ours is still ours to tidy away
+        where = f" in {tidy(folder)}" if folder.exists() or gone else ""
+        out.print(
+            Text(f"  Nothing to clean up: attention hasn't saved anything{where}.", style=viz.FAINT)
+        )
+        if gone:
+            out.print(
+                Text.assemble(
+                    ("  ✓ ", f"bold {viz.GREEN}"), (f"Removed the empty folder {tidy(folder)}", "")
+                )
+            )
+        out.print()
+        return
+
+    out.print(Text("  This deletes, for good:", style="bold"))
+    for path in doomed:
+        out.print(Padding(Text.assemble(("• ", viz.FAINT), (tidy(path), "bold")), (0, 0, 0, 4)))
+        out.print(Padding(Text(describe(path), style=viz.FAINT), (0, 0, 0, 6)))
+    out.print()
+    if not yes:
+        try:
+            go = typer.confirm(f"  Delete {'it' if len(doomed) == 1 else 'them'}?", default=False)
+        except typer.Abort:
+            go = False
+        if not sys.stdin.isatty():
+            out.print()  # the answer came from a pipe, so nothing ended the prompt's line
+        if not go:
+            out.print(Text("  Nothing deleted. (Add --yes to skip the question.)", style=viz.FAINT))
+            out.print()
+            return
+    gone = remove(doomed)
+    n = len(doomed)
+    out.print(
+        Text.assemble(
+            ("  ✓ ", f"bold {viz.GREEN}"), (f"Deleted {n} file{'s' if n != 1 else ''}", "")
+        )
+    )
+    if gone:
+        out.print(Text.assemble(("  ✓ ", f"bold {viz.GREEN}"), (f"Removed {tidy(folder)}", "")))
+    elif folder.is_dir():
+        out.print(
+            Text(f"  Left {tidy(folder)} in place: it has other files in it.", style=viz.FAINT)
+        )
+    out.print()
+
+
+def describe(path: Path) -> str:
+    """A few words about a file attention saved."""
+    size = f"{path.stat().st_size / 1024:.0f} KB"
+    if path.name.endswith(".tmp.npz"):
+        return f"an unfinished save · {size}"
+    try:
+        card = load(path).card
+    except (OSError, ValueError, KeyError, TypeError):
+        return f"a saved model · {size}"
+    return f"{card.name}, a {card.noun} model · {size}"
 
 
 def main() -> None:

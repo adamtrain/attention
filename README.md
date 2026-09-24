@@ -149,6 +149,7 @@ attention explain stegosa          # one prediction up close, with backprop as a
 attention explain stegosa --teach e  # ...and what one step of learning toward "e" would do
 attention info                     # everything about it, and how to make it again
 attention train                    # train a new one, with the live dashboard
+attention clean                    # delete it when you're done
 ```
 
 <p align="center">
@@ -167,6 +168,7 @@ reproduced from what it learned.
 | `attention generate [START]` | Invent new words, optionally starting with some letters |
 | `attention explain START` | Watch one prediction up close |
 | `attention info` | Your model's vital statistics |
+| `attention clean` | Delete everything attention has saved |
 
 | Option | |
 | --- | --- |
@@ -181,11 +183,16 @@ reproduced from what it learned.
 | `--plain` | Just the words, one per line (`generate`; also the default when piped) |
 | `--teach LETTER` | Show one step of learning toward a letter (`explain`) |
 | `-m, --model PATH` | Use a model file other than your saved one |
+| `-y, --yes` | Delete without asking first (`clean`) |
 
 Your model lives in `~/.local/share/attention/model.npz` (or `$XDG_DATA_HOME/attention`, or
 `%LOCALAPPDATA%\attention` on Windows; set `$ATTENTION_HOME` to put it anywhere). It's about
 40 KB: a plain NumPy archive with the weights and a small JSON card, so `numpy.load` opens it
 too.
+
+That file is the only thing attention leaves on your computer. `attention clean` shows what it
+will delete, asks, and removes it, along with its folder if nothing else is in there. It only
+ever deletes attention's own model files, so anything else you keep in that folder stays put.
 
 ### Your own words
 
