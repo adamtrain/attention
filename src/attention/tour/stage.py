@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 
@@ -41,6 +41,13 @@ class Quit(Exception):
 
 
 type Frame = RenderableType | tuple[RenderableType, float]
+type Frames = Callable[[], Iterable[Frame]]  # called again for every replay
+
+PAUSE = ("space", "p")
+SKIP = ("right", "enter", "s")
+RESTART = ("r",)
+GLIMPSE = 0.1  # while skipping to the end, show a frame this often (seconds)
+AGAIN = 0.8  # on a replay, hold the first frame at least this long, to see it start over
 
 
 def markup(text: str) -> Text:
@@ -138,10 +145,22 @@ class Stage:
         """Is there someone to wait for (or an autopilot standing in for them)?"""
         return self.keys is not None or self.auto is not None
 
-    def prompt(self, hint: str) -> Text:
+    def prompt(self, hint: str, again: str | None = None) -> Text:
+        """The line that says which keys do what."""
         return Text.assemble(
-            ("› ", viz.ACCENT), ("space", "bold"), (f" to {hint}  ·  ", viz.FAINT), ("q", "bold"),
-            (" to quit", viz.FAINT),
+            ("› ", viz.ACCENT), ("space", "bold"), (f" to {hint}  ·  ", viz.FAINT),
+            *((("r", "bold"), (f" to {again}  ·  ", viz.FAINT)) if again else ()),
+            ("q", "bold"), (" to quit", viz.FAINT),
+        )  # fmt: skip
+
+    def controls(self, paused: bool) -> Text:
+        """The line under a playing animation."""
+        state = ("❚❚ paused", f"bold {viz.AMBER}") if paused else ("▶ playing", viz.ACCENT)
+        return Text.assemble(
+            ("  ", ""), state, ("   ", ""),
+            ("space", "bold"), (" resume  ·  " if paused else " pause  ·  ", viz.FAINT),
+            ("→", "bold"), (" skip  ·  ", viz.FAINT), ("r", "bold"), (" restart  ·  ", viz.FAINT),
+            ("q", "bold"), (" quit", viz.FAINT),
         )  # fmt: skip
 
     def _await(self) -> str | None:
@@ -158,15 +177,20 @@ class Stage:
         ):
             return self._await()
 
-    def ready(self, live: Live, frame: RenderableType, hint: str) -> None:
-        """Show an animation's opening frame with a prompt under it, and wait for the go-ahead.
+    def ready(
+        self, live: Live, frame: RenderableType, hint: str, again: str | None = None
+    ) -> str | None:
+        """Show a frame with a prompt under it, and wait for the go-ahead. Returns the key.
 
-        That way the viewer can finish reading, and make sense of the picture, before it moves.
+        Before an animation, that lets the viewer finish reading and make sense of the picture
+        before it moves. After one, it's the chance to watch it again.
         """
+        key = None
         if self.patient:
-            live.update(self.pad(Group(frame, Text(""), self.prompt(hint))), refresh=True)
-            self._await()
+            live.update(self.pad(Group(frame, Text(""), self.prompt(hint, again))), refresh=True)
+            key = self._await()
         live.update(self.pad(frame), refresh=True)
+        return key
 
     def sleep(self, seconds: float) -> bool:
         """Wait a moment. Returns True if a key cut it short."""
@@ -175,39 +199,116 @@ class Stage:
         return self._key(seconds / self.speed) is not None
 
     def play(
-        self, frames: Iterable[Frame], fps: float = 12.0, start: str | None = "play it"
+        self,
+        frames: Frames,
+        fps: float = 12.0,
+        start: str | None = "play it",
+        then: str | None = "continue",
+        again: str = "replay",
     ) -> None:
-        """Show an animation. Any key skips to the end; the last frame stays on screen.
+        """Show an animation. The last frame stays on screen.
 
-        With `start`, the opening frame waits for a key before the rest plays, and `start` is
-        the prompt ("space to …"). Frames can be a renderable (shown for 1/fps seconds) or
-        (renderable, seconds).
+        `frames()` makes the frames: a renderable (shown for 1/fps seconds) or (renderable,
+        seconds). While it plays, space pauses, → skips to the end and r starts it over. With
+        `start`, the opening frame waits for a key before the rest plays, and `start` is the
+        prompt ("space to …"). With `then`, the last frame waits too, and offers to play it
+        `again`. Every replay calls `frames()` again, so anything random comes out differently.
         """
-        last: RenderableType | None = None
         if not self.animate:
-            for frame in frames:
+            last = None
+            for frame in frames():
                 last = frame[0] if isinstance(frame, tuple) else frame
             if last is not None:
                 self.show(last)
             return
-        skipping = False
         with Live(console=self.console, auto_refresh=False, transient=False) as live:
-            for i, frame in enumerate(frames):
-                last, seconds = frame if isinstance(frame, tuple) else (frame, 1 / fps)
-                if skipping:
-                    continue
-                if i == 0 and start:
-                    self.ready(live, last, start)  # they've had a good look at this one already
-                    continue
-                live.update(self.pad(last), refresh=True)
-                skipping = self._key(seconds / self.speed) is not None
+            last, replay = self._run(live, frames(), fps, start)
+            while replay or (
+                last is not None and then and self.ready(live, last, then, again) in RESTART
+            ):
+                last, replay = self._run(live, frames(), fps, None, AGAIN)
             if last is not None:
                 live.update(self.pad(last), refresh=True)
         self.console.print()
 
+    def _run(
+        self,
+        live: Live,
+        frames: Iterable[Frame],
+        fps: float,
+        start: str | None,
+        first: float = 0.0,
+    ) -> tuple[RenderableType | None, bool]:
+        """Play frames once. Returns the last one, and whether the viewer asked to start over.
+
+        The first frame stays up for at least `first` seconds.
+        """
+        last: RenderableType | None = None
+        controls: bool | None = None  # decided on the first frame: only if they fit
+        skipping = False
+        glimpsed = due = time.monotonic()
+        for i, frame in enumerate(frames):
+            last, seconds = frame if isinstance(frame, tuple) else (frame, 1 / fps)
+            if i == 0:
+                seconds = max(seconds, first)
+            if skipping:
+                if time.monotonic() - glimpsed >= GLIMPSE:
+                    live.update(self.pad(last), refresh=True)
+                    glimpsed = time.monotonic()
+                continue
+            if controls is None:
+                controls = self.keys is not None and self._fits(last, extra=2)
+            if i == 0 and start:
+                # They've had a good look at this one already. → goes straight to the end.
+                skipping = self.ready(live, last, start) == "right"
+                glimpsed = due = time.monotonic()
+                continue
+            self._draw(live, last, controls, paused=False)
+            # Making this frame ate into the last one's time; if it took longer, don't catch up.
+            due = max(due + seconds / self.speed, time.monotonic())
+            action, due = self._hold(live, last, controls, due)
+            if action == "restart":
+                return last, True
+            if action == "skip":
+                skipping, glimpsed = True, time.monotonic()
+        return last, False
+
+    def _hold(
+        self, live: Live, frame: RenderableType, controls: bool, due: float
+    ) -> tuple[str | None, float]:
+        """Keep a frame up until `due`, pausing if asked. Returns what to do next, and when."""
+        while True:
+            key = self._key(max(0.0, due - time.monotonic()))
+            if key is None:
+                return None, due
+            if key in SKIP:
+                return "skip", due
+            if key in RESTART:
+                return "restart", due
+            if key not in PAUSE:
+                continue
+            paused = time.monotonic()
+            self._draw(live, frame, controls, paused=True)
+            while (key := self._key(None)) is not None and key not in PAUSE:
+                if key in SKIP:
+                    return "skip", due
+                if key in RESTART:
+                    return "restart", due
+            due += time.monotonic() - paused  # the pause doesn't use up the frame's time
+            self._draw(live, frame, controls, paused=False)
+
+    def _draw(self, live: Live, frame: RenderableType, controls: bool, paused: bool) -> None:
+        shown = Group(frame, Text(""), self.controls(paused)) if controls else frame
+        live.update(self.pad(shown), refresh=True)
+
+    def _fits(self, frame: RenderableType, extra: int) -> bool:
+        """Is there room under this frame for `extra` more lines?"""
+        lines = self.console.render_lines(self.pad(frame), pad=False)
+        return len(lines) + extra < self.height
+
     @contextmanager
     def live(self) -> Iterator[Live]:
-        """For hand-rolled animations: update it yourself, poll `stage.pressed()`."""
+        """For hand-rolled interactive pictures: update it yourself, read `stage.key()`."""
         with Live(console=self.console, auto_refresh=False, transient=False) as live:
             yield live
         self.console.print()
@@ -215,10 +316,6 @@ class Stage:
     def key(self, timeout: float | None = None) -> str | None:
         """The next key the viewer presses (q still quits)."""
         return self._key(timeout)
-
-    def pressed(self, within: float = 0.0) -> bool:
-        """Wait up to `within` seconds for a key. Was one pressed?"""
-        return self._key(within / self.speed) is not None
 
 
 def hold(frame: RenderableType, seconds: float) -> tuple[RenderableType, float]:

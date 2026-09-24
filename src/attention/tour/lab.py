@@ -26,6 +26,7 @@ class Lab:
     name: str = ""
     seconds: float = 0.0
     saved_to: Path | None = None
+    rolls: dict[int, int] = field(default_factory=dict)  # how often each dice stream was used
 
     @classmethod
     def create(
@@ -41,6 +42,23 @@ class Lab:
             rng=np.random.default_rng([seed, 3]),
             model_path=model_path or default_path(),
         )
+
+    def dice(self, stream: int) -> np.random.Generator:
+        """Random numbers for one job: the same on a seed's first roll, different on a replay."""
+        n = self.rolls.get(stream, 0)
+        self.rolls[stream] = n + 1
+        return np.random.default_rng([self.seed, stream, n] if n else [self.seed, stream])
+
+    def reseed(self) -> None:
+        """Start over with a fresh, untrained model, from new random numbers."""
+        seed = self.seed
+        while seed == self.seed:
+            seed = int(np.random.default_rng().integers(1, 10_000))
+        self.seed = seed
+        self.trainer = prepare(self.corpus, seed, self.trainer.steps)
+        self.baselines = baselines(self.trainer.data)
+        self.initial = self.trainer.model.copy()
+        self.rolls.clear()
 
     @property
     def model(self) -> Transformer:

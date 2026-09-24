@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from attention.corpus import built_in
-from attention.finetune import learn_from, niche_trainer, share
+from attention.finetune import drift, learn_from, niche_trainer, share
 from attention.generate import invent
 from attention.train import prepare
 
@@ -19,7 +19,7 @@ def test_fine_tuning_on_a_niche_shifts_what_it_writes(pretrained):
     niche = built_in("dinosaurs").niche
     rng = np.random.default_rng(0)
     before = share(invent(pretrained.model, pretrained.data.vocab, rng, 40, 0.8), niche)
-    tuner = niche_trainer(pretrained.model, pretrained.data, niche, seed=3)
+    tuner = niche_trainer(pretrained.model, pretrained.data, niche, np.random.default_rng([3, 6]))
     assert all(niche.has(w) for w in tuner.data.train)
     while not tuner.done:
         tuner.step()
@@ -38,3 +38,12 @@ def test_feedback_makes_liked_words_likelier_on_a_copy(pretrained):
         assert now < was  # "1 in N" got smaller: likelier
     for name, w in pretrained.model.params.items():
         np.testing.assert_array_equal(w, original[name])
+
+
+def test_fine_tuning_moves_the_weights_a_little(pretrained):
+    niche = built_in("dinosaurs").niche
+    tuner = niche_trainer(pretrained.model, pretrained.data, niche, np.random.default_rng(1))
+    assert drift(tuner.model, pretrained.model) == 0
+    while not tuner.done:
+        tuner.step()
+    assert 0 < drift(tuner.model, pretrained.model) < 0.5

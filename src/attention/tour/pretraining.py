@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
+from rich.console import RenderableType
 from rich.table import Table
 from rich.text import Text
 
-from .. import viz
+from .. import dashboard, viz
 from ..dashboard import Watch
-from ..dashboard import run as train_live
 from .lab import Lab
 from .stage import Stage
 
@@ -32,19 +33,15 @@ def run(stage: Stage, lab: Lab) -> None:
     )
 
     watch = Watch(tr, lab.baselines, c, lab.seed, lab.rng)
-    if stage.animate:
-        with stage.live() as live:
-            train_live(
-                watch,
-                lambda frame: live.update(stage.pad(frame), refresh=True),
-                stage.width,
-                SECONDS / stage.speed,
-                stage.pressed,
-                ready=lambda frame: stage.ready(live, frame, "start training"),
-            )
-    else:
-        train_live(watch, lambda frame: None, stage.width, 0, lambda _: False)
-        stage.show(watch.render(stage.width))
+
+    def training() -> Iterator[tuple[RenderableType, float]]:
+        nonlocal watch
+        if lab.trainer.step_number:  # a replay: a new model, from new random numbers
+            lab.reseed()
+            watch = Watch(lab.trainer, lab.baselines, c, lab.seed, lab.rng)
+        return dashboard.frames(watch, stage.width, SECONDS)
+
+    stage.play(training, start="start training", then="see how it did", again="train a new one")
     lab.seconds = watch.compute
     path = lab.finish()
     stage.show(summary(lab, path))

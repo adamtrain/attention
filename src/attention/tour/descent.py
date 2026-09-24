@@ -48,7 +48,7 @@ def run(stage: Stage, lab: Lab) -> None:
         "Here's a landscape with just two weights, [b]a[/b] and [b]b[/b]. Darker is lower. "
         "Three walkers set off from the same spot with different learning rates:"
     )
-    stage.play(race(stage.width), fps=12, start="let them walk")
+    stage.play(lambda: race(stage.width), fps=12, start="let them walk")
     stage.say(
         "Too small and training takes forever. Too big and it overshoots, bouncing from one "
         "side of the valley to the other (or flying off completely). Choosing the learning "

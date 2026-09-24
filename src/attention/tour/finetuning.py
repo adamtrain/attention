@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import time
+from collections.abc import Iterator
 
 import numpy as np
 from rich.console import Group
@@ -10,17 +10,18 @@ from rich.table import Table
 from rich.text import Text
 
 from .. import viz
-from ..finetune import LEARNING_RATE, STEPS, Feedback, learn_from, niche_trainer, share
+from ..finetune import LEARNING_RATE, STEPS, Feedback, drift, learn_from, niche_trainer, share
 from ..generate import invent
 from ..train import LEARNING_RATE as PRETRAINING_RATE
 from ..train import Trainer, evaluate
 from ..views import display
 from .lab import Lab
-from .stage import Stage
+from .stage import Frame, Stage
 
 SAMPLES = 8
 CHOICES = 6
 SECONDS = 8
+FPS = 8
 
 
 def run(stage: Stage, lab: Lab) -> None:
@@ -28,41 +29,43 @@ def run(stage: Stage, lab: Lab) -> None:
     niche = c.niche
     examples = [w for w in data.train if niche.has(w)]
     stage.say(
-        f"Pretraining gave you a model that writes any kind of {c.noun}. [b]Fine-tuning[/b] takes "
-        "a pretrained model and trains it a little more, on a small set of examples of just what "
-        f"you want. Say you only want {niche.label}. There are {len(examples)} in the training "
-        "data:"
+        f"Pretraining gave you a model that writes any kind of {c.noun}. [b]Fine-tuning[/b] "
+        f"is how you get one that does something more particular. Say you only want "
+        f"{niche.label}. There are {len(examples)} in the training data:"
     )
     stage.show(word_grid(examples, stage.width))
+    stage.say(
+        "Fine-tuning is the pretraining loop all over again: run some examples forward, "
+        "measure the loss, backpropagate, and step every weight downhill. Only three things "
+        "change:",
+        gap=False,
+    )
+    stage.console.print()
+    stage.show(recipe(lab, len(examples)))
+    trainer = niche_trainer(lab.model, data, niche, lab.dice(6))
+    batch = trainer.batch_size
+    stage.say(
+        f"Starting from pretrained weights is what makes it work with so few examples: the "
+        f"model already knows how {c.plural} are put together, so all it has to learn is "
+        "which ones to prefer. The gentle pace is so that it adjusts what it knows rather "
+        f"than overwriting it. And with only {len(examples)} examples, {STEPS} steps of "
+        f"{batch} means it sees each one about {STEPS * batch // len(examples)} times."
+    )
     rng = np.random.default_rng([lab.seed, 11])
     before_words = invent(lab.model, lab.vocab, rng, 40, 0.8)
     before = share(before_words, niche)
     stage.say(
-        f"Right now, {before:.0%} of what your model invents ends in -{niche.ending}. Here's a copy "
-        f"of it training on just those {len(examples)}, for {STEPS} small steps, with a learning "
-        f"rate about a third of pretraining's ({LEARNING_RATE} instead of {PRETRAINING_RATE}):"
+        f"Right now, {before:.0%} of what your model invents ends in -{niche.ending}. Here's "
+        "a copy of it, fine-tuning. Your own model isn't touched:"
     )
 
-    trainer = niche_trainer(lab.model, data, niche, lab.seed)
-    samples = before_words[:SAMPLES]
-    if stage.animate:
-        with stage.live() as live:
-            stage.ready(live, progress(trainer, samples, before, niche.ending), "fine-tune it")
-            start = time.monotonic()
-            hurry = False
-            while not trainer.done:
-                target = STEPS * min(1.0, (time.monotonic() - start) / (SECONDS / stage.speed))
-                trainer.step()
-                while (hurry or trainer.step_number < target) and not trainer.done:
-                    trainer.step()
-                if trainer.step_number % 5 == 0 or trainer.done:
-                    samples = invent(trainer.model, lab.vocab, rng, SAMPLES, 0.8)
-                now = share(invent(trainer.model, lab.vocab, rng, 20, 0.8), niche)
-                live.update(stage.pad(progress(trainer, samples, now, niche.ending)), refresh=True)
-                hurry = hurry or stage.pressed(1 / 10)
-    else:
-        while not trainer.done:
-            trainer.step()
+    def tuning() -> Iterator[Frame]:
+        nonlocal trainer
+        if trainer.step_number:  # a replay: start again from your model, with new dice
+            trainer = niche_trainer(lab.model, data, niche, lab.dice(6))
+        return training(lab, trainer, rng, before_words[:SAMPLES], before)
+
+    stage.play(tuning, fps=FPS, start="fine-tune it", again="try again")
 
     after_words = invent(trainer.model, lab.vocab, rng, 40, 0.8)
     after = share(after_words, niche)
@@ -71,27 +74,49 @@ def run(stage: Stage, lab: Lab) -> None:
     stage.show(compare(before_words, after_words, before, after, niche.ending, set(c.words)))
     stage.say(
         f"From {before:.0%} to {after:.0%}, from {len(examples)} examples and a fraction of a "
-        f"second of training. It was quick because the model already knew how {c.plural} work: "
-        "fine-tuning only had to change which ones it prefers. With so few examples, some of "
-        "what it writes now are straight copies of them."
+        "second of training. With so few examples, each seen so many times, some of what it "
+        "writes now are straight copies of them."
+    )
+    stage.say(
+        "And its weights hardly moved. Measured against their size, fine-tuning changed them "
+        f"by [b]{drift(trainer.model, lab.model):.0%}[/b]; pretraining had moved them "
+        f"{drift(lab.model, lab.initial):.0%} from where they started. Fine-tuning doesn't "
+        "build new knowledge so much as tilt the model toward part of what it already has."
     )
     stage.say(
         f"There's a price. Its loss on held-back {c.plural} of every kind rose from "
         f"{general_before:.2f} to [b]{general_after:.2f}[/b]: it got worse at everything "
-        "else. Fine-tune too hard and a model forgets what it used to know."
+        "else. Fine-tune too hard, or on too narrow a diet, and a model forgets what it used to "
+        "know. That's called [b]catastrophic forgetting[/b], and it's why fine-tuning is kept "
+        "short and gentle."
+    )
+    stage.note(
+        "Fine-tuning a big model changes billions of weights and needs a lot of memory, so "
+        "people often freeze the original weights and train a small add-on instead. The most "
+        "popular kind, LoRA, learns a correction to each grid of weights that takes a tiny "
+        "fraction of the numbers."
     )
     stage.wait("see how this makes a chatbot")
 
     stage.say(
         "This is how chat assistants are made. Pretrained on the internet, a model will continue "
         "any text the way a web page might, so a question could be followed by more questions. "
-        "Fine-tuned on many thousands of example conversations, each a question and a helpful "
-        "answer, it learns to continue with the answer. Same model, same next-token prediction, "
-        "a different taste in what comes next."
+        "To fix that, it's fine-tuned on many thousands of example conversations, each a request and a "
+        "good reply."
     )
     stage.say(
-        "Then comes learning from [b]feedback[/b]. People compare a model's answers, pick the ones "
-        "they prefer, and training makes those likelier and the others less so."
+        "Each conversation is written out as one piece of text, with special tokens marking "
+        "who's talking, something like `<user>` … `<assistant>` …, and the loss only counts "
+        "the assistant's parts, so the model learns to write replies, not requests. When you "
+        "chat with one, your message goes after `<user>`, and the model predicts what comes "
+        "after `<assistant>`. Same model, same next-token prediction, a different taste in "
+        "what comes next."
+    )
+    stage.say(
+        "Then comes learning from [b]feedback[/b]. People compare a model's answers and pick "
+        "the ones they prefer, and training makes those likelier and the others less so. It's "
+        "the same gradient descent, aimed at what people liked instead of at what the text "
+        "said."
     )
     if stage.keys is not None and stage.auto is None:
         stage.say("Your turn. Here are some fresh inventions from your pretrained model.")
@@ -112,6 +137,26 @@ def run(stage: Stage, lab: Lab) -> None:
     )
 
 
+def recipe(lab: Lab, examples: int) -> Table:
+    """What fine-tuning does differently from pretraining."""
+    pre = lab.trainer
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(style=f"bold {viz.ACCENT}", no_wrap=True)
+    grid.add_column()
+    grid.add_row("starts from", "your pretrained weights, instead of random ones")
+    grid.add_row(
+        "learns from",
+        f"only the {examples} that end in -{lab.corpus.niche.ending}, instead of all "
+        f"{len(lab.data.train)} {lab.corpus.plural}",
+    )
+    grid.add_row(
+        "goes gently",
+        f"{STEPS} steps instead of {pre.steps}, with a learning rate of {LEARNING_RATE} instead "
+        f"of {PRETRAINING_RATE}",
+    )
+    return grid
+
+
 def word_grid(words: list[str], width: int, most: int = 18) -> Table:
     shown = words[:most]
     col = max(len(w) for w in shown) + 2
@@ -125,6 +170,25 @@ def word_grid(words: list[str], width: int, most: int = 18) -> Table:
     if len(words) > most:
         grid.add_row(Text(f"…and {len(words) - most} more", style=viz.FAINT), *([""] * (cols - 1)))
     return grid
+
+
+def training(
+    lab: Lab, trainer: Trainer, rng: np.random.Generator, samples: list[str], before: float
+) -> Iterator[Frame]:
+    """Fine-tuning, a picture at a time: what it writes, and how much of it is in the niche."""
+    niche = lab.corpus.niche
+    yield progress(trainer, samples, before, niche.ending)
+    total, shown = SECONDS * FPS, 0
+    while not trainer.done:
+        shown += 1
+        target = trainer.steps * min(1.0, shown / total)
+        trainer.step()
+        while trainer.step_number < target and not trainer.done:
+            trainer.step()
+        if trainer.step_number % 5 == 0 or trainer.done:
+            samples = invent(trainer.model, lab.vocab, rng, SAMPLES, 0.8)
+        now = share(invent(trainer.model, lab.vocab, rng, 20, 0.8), niche)
+        yield progress(trainer, samples, now, niche.ending)
 
 
 def progress(trainer: Trainer, samples: list[str], now: float, ending: str) -> Group:

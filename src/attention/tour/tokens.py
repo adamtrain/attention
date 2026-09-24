@@ -43,7 +43,7 @@ def run(stage: Stage, lab: Lab) -> None:
         "The model's whole job is to [b]predict the next token[/b]. That makes every word "
         f"a little set of quizzes. {display(word)} is {len(word) + 1} of them:"
     )
-    stage.play(quizzes(lab, ids), fps=10, start="see every quiz")
+    stage.play(lambda: quizzes(lab, ids), fps=10, start="see every quiz")
     stage.say(
         "When the answer is `.`, the word is finished. That's how the model will know when to stop."
     )
@@ -56,7 +56,7 @@ def run(stage: Stage, lab: Lab) -> None:
         f"often, glue it into one new token, and repeat. Here it is, running on your {c.plural}:"
     )
     merges = bpe.learn(c.words, MERGES)
-    stage.play(merging(lab, merges), fps=4, start="watch it merge")
+    stage.play(lambda: merging(lab, merges), fps=4, start="watch it merge")
     before, after = bpe.average_length(c.words, []), bpe.average_length(c.words, merges)
     stage.say(
         f"After {len(merges)} merges, the average {c.noun} takes {after:.1f} tokens instead of "

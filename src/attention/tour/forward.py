@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import numpy as np
+from rich.console import Group
 from rich.table import Table
 from rich.text import Text
 
@@ -18,16 +20,50 @@ def run(stage: Stage, lab: Lab) -> None:
     inputs, targets = lab.example()
     t = inputs.shape[1]
     stage.say(
-        "Now you've seen the main parts. Here's the whole model, top to bottom, with the shape "
-        f"of the grid of numbers flowing through it for {t} tokens:"
+        "Here's the whole model, top to bottom. The purple numbers on the right are the shape "
+        f"of the grid flowing through it for {t} tokens: rows, times numbers per row."
     )
     stage.show(diagram(lab, t))
+    focus = max(1, round(len(lab.corpus.example) * 0.65))
+    seen = lab.vocab.decode(inputs[0, : focus + 1])
     stage.say(
-        "The [b]MLP[/b] (multi-layer perceptron) is a small two-layer network that each "
-        f"position runs on its own, widening its {c.width} numbers to {c.hidden} and back. "
-        "Attention moves information between positions; the MLP works on it. The [b]⊕[/b] "
-        "adds each block's output back onto its input, so information can also flow straight "
-        "past. Before each block, a [b]norm[/b] rescales every vector to a steady size."
+        "You've met embeddings and attention. The new box is the [b]MLP[/b] (short for "
+        "multi-layer perceptron, an old name for the simplest kind of neural network). "
+        "Attention moves information [i]between[/i] positions. The MLP then works on what each "
+        "position has gathered, one position at a time, without looking at the others."
+    )
+    stage.say(
+        f"It's two grids of weights with a switch in between. The first grid turns a "
+        f"position's {c.width} numbers into {c.hidden}: {c.hidden} different weighted sums, "
+        "each one a little detector for some pattern in the vector. Then the switch, called "
+        "[b]ReLU[/b], sets every negative number to 0 and lets positive ones through, so each "
+        "detector either fires or stays quiet. The second grid mixes whichever detectors "
+        f"fired back down to {c.width} numbers. Here it is at the `{seen[-1]}` in `{seen}`:"
+    )
+    tr = lab.model.forward(inputs)
+    stage.show(mlp(tr.m_in[0, focus], tr.pre[0, focus], tr.x2[0, focus] - tr.x1[0, focus]))
+    stage.say(
+        "The switch is what makes it more than arithmetic. Two grids in a row with nothing "
+        "between them can only ever do what one grid could; the on-or-off step lets the "
+        "network react to combinations, like “a vowel, right after a q”. Research suggests "
+        "much of what a big model knows, facts included, is stored in its MLPs."
+    )
+    stage.wait()
+
+    stage.say(
+        "The [b]⊕[/b] is a [b]residual connection[/b]: each block's output is [i]added[/i] "
+        "onto its input instead of replacing it. Picture the grid running down the left side "
+        "as a shared notebook. Each block reads it, and adds its notes back in. Whatever a "
+        "block doesn't change flows straight past it. That also gives backprop a clear "
+        "path back down, which is a big part of why stacks of dozens of blocks can be trained "
+        "at all."
+    )
+    stage.say(
+        "Before each block, a [b]norm[/b] rescales each position's vector to a steady size "
+        "without changing its direction, so no block gets thrown by numbers that happen to be "
+        "huge or tiny. And at the bottom, [b]unembed[/b] is one last grid: it turns each "
+        f"position's {c.width} numbers into a score for each of the {c.vocab} tokens, which "
+        "softmax turns into probabilities for the next one."
     )
     stage.note(
         "Big models stack this attention-and-MLP block dozens of times; GPT-3 has 96 of them. "
@@ -45,16 +81,33 @@ def run(stage: Stage, lab: Lab) -> None:
     stage.show(excerpt(Transformer.forward, "# 1. Look up", "return Trace"))
     stage.wait()
 
-    focus = max(1, round(len(lab.corpus.example) * 0.65))
-    seen = lab.vocab.decode(inputs[0, : focus + 1])
     right = int(targets[0, focus])
-    probs = lab.model.forward(inputs).probs[0, focus]
+    probs = tr.probs[0, focus]
     stage.say(f"Let's run it. After `{seen}`, the untrained model thinks the next letter is:")
     stage.show(prob_bars(probs, lab.vocab, top=8, width=30, right=right))
     stage.say(
         f"Every token gets about 1 in {c.vocab}, around {1 / c.vocab:.1%}. It hasn't learned a "
         "thing yet. Its weights are random, so its guesses are too."
     )
+
+
+def mlp(x: np.ndarray, pre: np.ndarray, out: np.ndarray) -> Group:
+    """One position through the MLP: widen, switch, narrow."""
+    fired = np.maximum(pre, 0.0)
+    scale = viz.scale_of(pre)
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(style="bold", no_wrap=True)
+    grid.add_column(no_wrap=True)
+    grid.add_row("in", viz.signed_cells(x, viz.scale_of(x)))
+    grid.add_row("up", viz.signed_cells(pre, scale, 1))
+    grid.add_row("ReLU", viz.signed_cells(fired, scale, 1))
+    grid.add_row("down", viz.signed_cells(out, viz.scale_of(out)))
+    n = int((pre > 0).sum())
+    caption = Text.assemble(
+        (f"{len(x)} numbers in, {len(pre)} detectors, ", viz.FAINT), (f"{n} fired", "bold"),
+        (f", {len(out)} numbers out, added onto the vector", viz.FAINT),
+    )  # fmt: skip
+    return Group(grid, Text(""), caption)
 
 
 def diagram(lab: Lab, t: int) -> Table:

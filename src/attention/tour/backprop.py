@@ -32,12 +32,26 @@ def run(stage: Stage, lab: Lab) -> None:
         "[b]b[/b], a prediction [b]p = w·x + b[/b], and a loss [b]L = (p − y)²[/b], where "
         "[b]y[/b] is the right answer."
     )
-    stage.play(graph_story(), fps=1, start="run it forward, then backward")
+    stage.play(graph_story, fps=1, start="run it forward, then backward")
     stage.say(
         "Each number in amber is a [b]gradient[/b]: how much the loss would change if that "
         "number were nudged up a little. w's is −8, so nudging w up by 0.01 would cut the "
-        "loss by about 0.08. Every gradient is the slopes along the path back from L, "
-        "multiplied together. That's the chain rule, and that's all backprop is."
+        "loss by about 0.08. A negative gradient means “raise me and the loss falls”; a "
+        "positive one means the opposite."
+    )
+    stage.say(
+        "They're worked out backwards from L, one link at a time. L is e², and e is −2, so L "
+        "changes 2 × −2 = −4 times as fast as e does: that's e's gradient. e is p − y, so e "
+        "moves exactly as p does, and p's gradient is −4 too. p is w·x + b, so that same −4 "
+        "reaches both w·x and b. Finally, w·x changes 2 times as fast as w, because x is 2, "
+        "so w's gradient is 2 × −4 = −8."
+    )
+    stage.say(
+        "Each step back multiplies by one more local slope, the slope of one small operation "
+        "like adding, multiplying or squaring. That's the [b]chain rule[/b], and it's all "
+        "backprop is. Because every step is that simple, a computer can do it for millions of "
+        "operations just as easily as for five, and one pass backward gives every number its "
+        "gradient."
     )
     stage.wait("follow the gradient")
 
@@ -49,7 +63,7 @@ def run(stage: Stage, lab: Lab) -> None:
         ("w ← w − ", "bold"), (f"{LR}", f"bold {viz.AMBER}"), (" × ∂L/∂w", "bold"),
         ("      b ← b − ", "bold"), (f"{LR}", f"bold {viz.AMBER}"), (" × ∂L/∂b", "bold"),
     ))  # fmt: skip
-    stage.play(descent(), fps=1, start="take the steps")
+    stage.play(descent, fps=1, start="take the steps")
     stage.say(
         "The prediction closes in on the right answer, 3. That's learning. Everything else "
         "is scale: your transformer does exactly this with its thousands of weights."
@@ -78,12 +92,19 @@ def run(stage: Stage, lab: Lab) -> None:
     loss, dlogits = cross_entropy(tr.logits, targets)
     grads, _ = lab.model.backward(tr, dlogits)
     stage.say(
-        "Then each layer's backward function takes the gradient of its output and works out "
-        "the gradient of its input and its weights, and hands the first one back to the layer "
-        f"before. Here it is flowing back from the loss ({loss:.2f}) through every weight:"
+        "From there it works back through the model a layer at a time, just like the little "
+        "example, only with grids of numbers instead of single ones. Every layer has a "
+        "[b]backward[/b] function. It's handed the gradient of the layer's output (“here's "
+        "how the loss depends on what you produced”) and works out two things from it: the "
+        "gradient of the layer's own weights, which is kept for the update, and the gradient "
+        "of its input, which it hands back to the layer before. Then that layer does the same."
     )
-    stage.play(flow(grads, stage.width), fps=8, start="send it back through the layers")
-    stage.wait()
+    stage.say(
+        f"Here it is flowing back from the loss ({loss:.2f}), from the unembedding at the end "
+        "of the model to the embeddings at the start, with the size of the gradient each set "
+        "of weights got:"
+    )
+    stage.play(lambda: flow(grads, stage.width), fps=8, start="send it back through the layers")
 
     stage.say(
         "Where did it end up? This is the token embedding table again. Green shows which way "
@@ -92,8 +113,9 @@ def run(stage: Stage, lab: Lab) -> None:
     )
     stage.show(embedding_push(lab, -grads["embed.token"].T, set(inputs[0].tolist())))
     stage.say(
-        "Every layer has a backward function. Here's the one for multiplying by a grid of "
-        "weights, which does most of the work:"
+        "Here's the backward function for multiplying by a grid of weights, which does most "
+        "of the work. Its rule is the one that gave w its −8: each weight's gradient is the "
+        "input it was multiplied by, times the gradient that reached its output."
     )
     stage.show(excerpt(linear_backward))
 

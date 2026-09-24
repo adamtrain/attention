@@ -30,17 +30,23 @@ def run(stage: Stage, lab: Lab) -> None:
         "throwing a dart. Likely letters are wide targets, unlikely ones narrow. Watch your "
         f"model invent a {lab.corpus.noun} (temperature {TEMPERATURE}):"
     )
-    steps = list(picks(lab.model, lab.vocab, lab.rng, TEMPERATURE))
-    stage.play(writing(lab, steps, stage.width), fps=4, start="throw the dart")
-    stage.wait()
+    steps: list[Pick] = []
+
+    def write() -> Iterator[Frame]:
+        steps[:] = picks(lab.model, lab.vocab, lab.rng, TEMPERATURE)  # a new word every replay
+        return writing(lab, steps, stage.width)
+
+    stage.play(write, fps=4, start="throw the dart", again="write another")
 
     n = len(steps)
     stage.say(
         f"Two things about that loop. First, [b]every letter reran the model on everything so "
         f"far[/b]: {n} steps meant {n * (n + 1) // 2} positions' worth of work. But thanks to the "
-        "causal mask, adding a letter never changes anything about the letters before it. So "
-        "real models keep each position's keys and values from the step before, in a "
-        "[b]KV cache[/b], and only work out the newest one:"
+        "causal mask, adding a letter never changes anything about the letters before it. "
+        "The new letter needs its own query, but it gets compared against the keys of every "
+        "earlier position and blends their values, and those are exactly what they were a "
+        "step ago. So real models keep each position's keys and values in a [b]KV cache[/b], "
+        "and only work out the newest one:"
     )
     stage.show(caching(lab, steps))
     c = lab.model.config

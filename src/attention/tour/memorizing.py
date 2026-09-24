@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -16,11 +16,12 @@ from ..model import Config, Transformer
 from ..train import Trainer, evaluate, smooth
 from ..views import display
 from .lab import Lab
-from .stage import Stage
+from .stage import Frame, Stage
 
 WIDTH, HIDDEN = 32, 128  # about three and a half times your model
 STEPS = 1600  # four times as long
 SECONDS = 16
+FPS = 15
 SAMPLES = 8
 
 
@@ -38,9 +39,9 @@ class Run:
     def start(cls, lab: Lab) -> Run:
         data = lab.data
         config = Config(len(data.vocab), data.context, width=WIDTH, heads=2, hidden=HIDDEN)
-        model = Transformer.create(config, np.random.default_rng([lab.seed, 7]))
-        trainer = Trainer(model, data, np.random.default_rng([lab.seed, 8]), steps=STEPS)
-        run = cls(trainer, set(data.train), np.random.default_rng([lab.seed, 9]))
+        model = Transformer.create(config, lab.dice(7))
+        trainer = Trainer(model, data, lab.dice(8), steps=STEPS)
+        run = cls(trainer, set(data.train), lab.dice(9))
         run.check()
         return run
 
@@ -78,25 +79,16 @@ def run(stage: Stage, lab: Lab) -> None:
         "model's held-back loss, for comparison."
     )
 
-    big = Run.start(lab)
     yours = tr.val_losses[-1][1] if tr.val_losses else lab.baselines.pairs
-    if stage.animate:
-        with stage.live() as live:
-            stage.ready(live, view(lab, big, yours, stage.width), "break the rules")
-            start = time.monotonic()
-            seconds = SECONDS / stage.speed
-            hurry = False
-            while not big.trainer.done:
-                target = STEPS * min(1.0, (time.monotonic() - start) / seconds)
-                big.step()
-                while (hurry or big.trainer.step_number < target) and not big.trainer.done:
-                    big.step()
-                live.update(stage.pad(view(lab, big, yours, stage.width)), refresh=True)
-                hurry = hurry or stage.pressed(1 / 15)
-    else:
-        while not big.trainer.done:
-            big.step()
-        stage.show(view(lab, big, yours, stage.width))
+    big = Run.start(lab)
+
+    def training() -> Iterator[Frame]:
+        nonlocal big
+        if big.trainer.step_number:  # a replay: a new big model, from new random numbers
+            big = Run.start(lab)
+        return overfit(lab, big, yours, stage.width)
+
+    stage.play(training, fps=FPS, start="break the rules", again="try another")
     if big.trainer.step_number % 40:
         big.check()
 
@@ -122,6 +114,18 @@ def run(stage: Stage, lab: Lab) -> None:
         "see most of it only once or twice. Text that turns up again and again, like famous "
         "quotes, can still end up memorized word for word."
     )
+
+
+def overfit(lab: Lab, big: Run, yours: float, width: int) -> Iterator[Frame]:
+    yield view(lab, big, yours, width)
+    total, shown = SECONDS * FPS, 0
+    while not big.trainer.done:
+        shown += 1
+        target = STEPS * min(1.0, shown / total)
+        big.step()
+        while big.trainer.step_number < target and not big.trainer.done:
+            big.step()
+        yield view(lab, big, yours, width)
 
 
 def view(lab: Lab, big: Run, yours: float, width: int) -> Table:

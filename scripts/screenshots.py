@@ -169,7 +169,7 @@ def main() -> None:
     niche = lab.corpus.niche
     rng = np.random.default_rng(11)
     before = invent(lab.model, lab.vocab, rng, 40, 0.8)
-    tuner = niche_trainer(lab.model, lab.data, niche, SEED)
+    tuner = niche_trainer(lab.model, lab.data, niche, lab.dice(6))
     while not tuner.done:
         tuner.step()
     after = invent(tuner.model, lab.vocab, rng, 40, 0.8)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -227,41 +227,47 @@ def pack(panels: list[tuple[int, RenderableType]], width: int, gap: int) -> list
     return tables
 
 
+FPS = 15
+
+
+def frames(watch: Watch, width: int, seconds: float) -> Iterator[tuple[RenderableType, float]]:
+    """Train to the end, a picture at a time, taking about `seconds` if drawing keeps up.
+
+    Early steps get more screen time than later ones: that's when the most happens. The first
+    picture is the untrained model.
+    """
+    tr = watch.trainer
+    total = max(1, round(seconds * FPS))
+    yield watch.render(width), 1.0
+    shown = 0
+    while not tr.done:
+        shown += 1
+        target = tr.steps * min(1.0, shown / total) ** 1.6
+        watch.step()
+        while tr.step_number < target and not tr.done:
+            watch.step()
+        yield watch.render(width), 1 / FPS
+
+
 def run(
     watch: Watch,
     update: Callable[[RenderableType], None],
     width: int,
     seconds: float,
     interrupted: Callable[[float], bool],
-    ready: Callable[[RenderableType], None] | None = None,
-) -> float:
-    """Train to the end, redrawing as it goes. Early steps get more screen time than later ones.
+) -> None:
+    """Train to the end, redrawing as it goes.
 
     `interrupted(timeout)` waits up to `timeout` seconds and says whether to hurry up and
-    finish. `ready(frame)`, if given, shows the untrained starting point and waits until the
-    viewer is ready to go. Returns how long training took.
+    finish, which still shows a glimpse now and then.
     """
-    tr = watch.trainer
-    fps = 15
-    if ready is not None:
-        ready(watch.render(width))
-        hurry = seconds <= 0
-    else:
-        update(watch.render(width))
-        hurry = seconds <= 0 or interrupted(min(1.5, seconds / 10) if seconds > 0 else 0)
-    start = time.monotonic()
-    while not tr.done:
-        if hurry:
-            watch.step()
-            if tr.step_number % 25 == 0 or tr.done:
-                update(watch.render(width))
-            continue
-        elapsed = time.monotonic() - start
-        target = tr.steps * min(1.0, elapsed / seconds) ** 1.6
-        watch.step()
-        while tr.step_number < target and not tr.done:
-            watch.step()
-        update(watch.render(width))
-        hurry = interrupted(1 / fps)
+    hurry = seconds <= 0
+    glimpsed = 0.0
+    for picture, pause in frames(watch, width, seconds):
+        if not hurry:
+            update(picture)
+            hurry = interrupted(min(pause, 1.5))
+        elif time.monotonic() - glimpsed > 0.1:
+            update(picture)
+            glimpsed = time.monotonic()
     update(watch.render(width))
-    return time.monotonic() - start

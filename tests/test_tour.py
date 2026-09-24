@@ -41,3 +41,41 @@ def test_narrow_terminals_still_work():
     console = Console(record=True, width=80, height=30, force_terminal=True, theme=THEME)
     narrow = Stage(console, animate=False)
     assert tour.run(narrow, corpus="dinosaurs", seed=1).finished
+
+
+def test_dice_repeat_for_a_seed_but_not_for_a_replay():
+    import numpy as np
+
+    from attention.corpus import built_in
+    from attention.tour.lab import Lab
+
+    first, second = Lab.create(built_in("names"), 4), Lab.create(built_in("names"), 4)
+    roll = first.dice(7).random()
+    assert roll == second.dice(7).random() == np.random.default_rng([4, 7]).random()
+    assert first.dice(7).random() != roll  # the replay
+
+
+def test_reseeding_starts_over_with_a_fresh_model():
+    from attention.corpus import built_in
+    from attention.tour.lab import Lab
+
+    lab = Lab.create(built_in("towns"), 4)
+    lab.train_quietly()
+    lab.dice(7)
+    lab.reseed()
+    assert lab.seed != 4
+    assert not lab.trained and lab.trainer.step_number == 0
+    assert lab.rolls == {}
+    assert all((lab.initial.params[k] == lab.model.params[k]).all() for k in lab.model.params)
+
+
+def test_the_dashboard_trains_to_the_end_a_frame_at_a_time():
+    from attention import dashboard
+    from attention.corpus import built_in
+    from attention.tour.lab import Lab
+
+    lab = Lab.create(built_in("dinosaurs"), 2, steps=60)
+    watch = dashboard.Watch(lab.trainer, lab.baselines, lab.corpus, lab.seed, lab.rng)
+    frames = list(dashboard.frames(watch, 96, seconds=2))
+    assert lab.trained
+    assert 1 < len(frames) <= 61  # at least one step per frame, after the untrained one

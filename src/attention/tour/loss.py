@@ -17,14 +17,27 @@ from .stage import Stage
 def run(stage: Stage, lab: Lab) -> None:
     v = lab.model.config.vocab
     stage.say(
-        "To learn, the model needs a score for how wrong it was. Take the probability it gave "
-        "the right answer, and compute −log of it. That's the [b]loss[/b]:"
+        "To learn, the model needs a score for how wrong it was: one number it can try to make "
+        "smaller. The usual one looks only at the probability the model gave the right "
+        "answer, and takes minus its logarithm (−log). That's the [b]loss[/b]. Here's how "
+        "the loss depends on that probability:"
     )
     stage.show(curve(v))
     stage.say(
-        "Sure and right costs almost nothing. A shrug, 1 in "
-        f"{v}, costs {np.log(v):.2f}. Sure and [i]wrong[/i] costs a fortune, which pushes the "
-        "model to hedge its bets unless it really knows."
+        "Read it from right to left. If the model gave the right answer 90%, the loss is only "
+        f"{-np.log(0.9):.2f}: it was confident and right, so there's hardly anything to fix. "
+        f"At 50% the loss is {np.log(2):.2f}. If it had no idea and spread its bets evenly, "
+        f"giving each of the {v} tokens the same 1 in {v}, the loss is {np.log(v):.2f}. "
+        f"Below that the curve shoots up: 1% costs {-np.log(0.01):.2f}, 0.1% costs "
+        f"{-np.log(0.001):.2f}, and as the probability heads toward zero, the loss heads "
+        "toward infinity."
+    )
+    stage.say(
+        "That steep climb is the point. Being confident about the [i]wrong[/i] answer "
+        "leaves almost no probability for the right one, and that gets punished far harder "
+        "than admitting it doesn't know. So the way to score well on average is to be "
+        "confident only when there's good reason to be, and to spread the bets when there "
+        "isn't."
     )
     stage.wait()
 
@@ -34,8 +47,10 @@ def run(stage: Stage, lab: Lab) -> None:
     inputs, targets = lab.example()
     loss, _ = cross_entropy(lab.model.forward(inputs).logits, targets)
     stage.say(
-        f"The average, {loss:.2f}, is the model's [b]cross-entropy loss[/b] on this word. "
-        "Training means exactly one thing: make that number smaller, across all the words."
+        f"Untrained, it's close to the {np.log(v):.2f} of an even spread on almost every quiz: "
+        f"it's shrugging at everything. The average, {loss:.2f}, is the model's "
+        "[b]cross-entropy loss[/b] on this word. Training means exactly one thing: make that "
+        "number smaller, averaged over every quiz in every word."
     )
 
 

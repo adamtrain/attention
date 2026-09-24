@@ -55,8 +55,15 @@ attention
 To try it without installing anything, run `uvx --from git+https://github.com/adamtrain/attention attention`.
 
 The tour looks best in a terminal at least 100 columns wide and 40 rows tall, with true color.
-It works at 80 columns. Press **space** to move on and **q** to quit, and press any key during
-an animation to skip to its end.
+It works at 80 columns. Every animation shows its first frame and waits, so you can read what
+it's about to show before it moves.
+
+| Key | |
+| --- | --- |
+| **space** | Move on, start an animation, or pause and resume one that's playing |
+| **→** | Skip to the end of an animation |
+| **r** | Play an animation again, from the start. Anything random comes out differently, and replaying pretraining trains a whole new model from a new seed |
+| **q** | Quit |
 
 ## The tour
 
@@ -66,11 +73,11 @@ towns**, each a few hundred real examples. Then you go through fifteen short cha
 | | | |
 | --- | --- | --- |
 | 1 | **Tokens** | Text becomes numbers, and every word a little set of next-letter quizzes. Then byte-pair encoding, live on your word list: how real models pick their chunks. |
-| 2 | **Embeddings** | Each token looks up a vector. Positions get vectors too. |
-| 3 | **Attention** | Queries, keys and values; the causal mask; softmax. Your model's real scores, animated. |
+| 2 | **Embeddings** | Each token looks up a vector of learned numbers, and positions get vectors too. |
+| 3 | **Attention** | Multiplying by a grid of weights and the dot product, worked through on real numbers; queries, keys and values; the causal mask; softmax. Your model's real scores, animated. |
 | 4 | **Softmax** | Scores become probabilities, and temperature makes guesses bolder or safer. |
-| 5 | **The whole model** | The full diagram, where the parameters live, and the entire forward pass in about 25 lines of your model's own source. |
-| 6 | **Loss** | −log p, one quiz at a time: how surprised the untrained model is. |
+| 5 | **The whole model** | The full diagram, the MLP's detectors firing, residual connections and norms, where the parameters live, and the entire forward pass in about 25 lines of your model's own source. |
+| 6 | **Loss** | −log p, why being sure and wrong costs so much, and how surprised the untrained model is at every quiz. |
 | 7 | **Backpropagation** | The chain rule on one neuron, then the gradient flowing back through the transformer. |
 | 8 | **Gradient descent** | Three learning rates race down a landscape; then one real step on your model. |
 | 9 | **Pretraining** | The live dashboard above: 400 steps, from gibberish to dinosaurs. |
@@ -78,7 +85,7 @@ towns**, each a few hundred real examples. Then you go through fifteen short cha
 | 11 | **What it learned** | Before and after: every quiz, a map of the embeddings, and each attention head. |
 | 12 | **Inference** | Writing one letter at a time with the dice roll shown; the KV cache and the context window; temperature and top-p; hallucination. |
 | 13 | **Under the microscope** | Backprop after training: which letters swayed a prediction, and what one step of learning would change. |
-| 14 | **Fine-tuning** | Specialize a copy of your model on a handful of examples, see what it forgets, and teach it with your own feedback. |
+| 14 | **Fine-tuning** | The pretraining loop with three changes: specialize a copy of your model on a handful of examples, see how little its weights move and what it forgets, and how chatbots are made. Then teach it with your own feedback. |
 | 15 | **Your model** | What you can do with it now, how it compares with GPT-3, and the whole story in one table. |
 
 **Attention, with real numbers.** Each position scores every earlier one, the causal mask

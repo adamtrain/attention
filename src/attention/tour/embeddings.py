@@ -13,18 +13,37 @@ from .stage import Stage
 
 
 def run(stage: Stage, lab: Lab) -> None:
-    p, vocab, width = lab.model.params, lab.vocab, lab.model.config.width
+    p, vocab, c = lab.model.params, lab.vocab, lab.model.config
+    width = c.width
     stage.say(
-        "A token ID is only a name tag: 19 isn't more of anything than 5. So each token "
-        f"looks up its own list of {width} numbers, called its [b]embedding[/b], in a table:"
+        "A token ID is only a name tag. Token 19 isn't bigger than token 5, or more like token "
+        "18 than token 2, so adding or multiplying IDs means nothing. The model needs a "
+        "description of each token that it [i]can[/i] do arithmetic on, and where tokens that "
+        "behave alike can look alike."
+    )
+    stage.say(
+        f"So each token gets its own list of {width} numbers, called its [b]embedding[/b]. (A "
+        "list of numbers like this is a [b]vector[/b]; you'll see that word a lot.) The "
+        "embeddings live in a table with one column per token, and turning a token into its "
+        "vector is just a lookup: find its column, read off the numbers. Here's your model's "
+        "table:"
     )
     table = p["embed.token"]
     scale = viz.scale_of(table)
     stage.show(embedding_table(lab, table.T, scale))
     stage.say(
-        f"Each column is one token's {width} numbers. That's room to describe a character: "
-        "Is it a vowel? Does it tend to end words? Nobody tells the model what the numbers "
-        "should mean. They start out random, as they are here, and training shapes them."
+        f"Each column is one token and each row is one of the {width} numbers. The color "
+        "shows each number's sign and size. Think of the numbers as dials that together "
+        "describe a token. One dial might end up meaning “is this a vowel?”, another “does "
+        "this tend to end a word?”. Tokens that behave alike get similar settings, so "
+        "whatever the model learns about one of them partly carries over to the rest."
+    )
+    stage.say(
+        "Nobody decides what the dials mean. The table is weights, like every other part of "
+        "the model: it starts out random, as it is here, and training adjusts every number in "
+        "it. In practice the meanings don't line up neatly with one dial each; they end up "
+        "smeared across many of them. Big models use the same trick with far more numbers "
+        "per token: GPT-3 used 12,288."
     )
     stage.wait()
 
@@ -34,15 +53,21 @@ def run(stage: Stage, lab: Lab) -> None:
     ch = vocab.chars[ids[pos]]
     stage.say(
         f"One problem: an `{ch}` at the start of a word and an `{ch}` at the end would get "
-        "identical vectors. So every position has an embedding too, and the model adds the two:"
+        "identical vectors, but order matters (“tops” and “stop” use the same letters). So "
+        f"there's a second table, with a vector for each of the {c.context} places a letter "
+        "can sit in a word, and it's learned too. The model adds the token's "
+        "vector and the position's vector, number by number, so the result says both "
+        "[i]which[/i] letter this is and [i]where[/i] it is:"
     )
     tok, where = table[ids[pos]], p["embed.position"][pos]
     stage.show(sum_rows(lab, ids[pos], pos, tok, where, scale))
     stage.wait()
 
     stage.say(
-        f"Do that at every position and {display(word)} becomes a grid of numbers, one row "
-        "per token. Everything from here on is arithmetic on grids like this one."
+        f"Do that at every position and {display(word)} becomes a grid of numbers: one row "
+        f"per token, {width} numbers per row. That grid is what flows into the rest of the "
+        "model. Everything from here on is arithmetic on grids like this one, and each step "
+        f"hands the next one a grid of the same shape, still {width} numbers per position."
     )
     tr = lab.model.forward(np.array([ids]))
     stage.show(input_grid(lab, ids, tr.x0[0], scale))

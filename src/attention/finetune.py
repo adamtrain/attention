@@ -15,18 +15,27 @@ STEPS = 60
 LEARNING_RATE = 0.003  # gentler than pretraining: we only want to adjust what it already knows
 
 
-def niche_trainer(model: Transformer, data: Dataset, niche: Niche, seed: int) -> Trainer:
+def niche_trainer(
+    model: Transformer, data: Dataset, niche: Niche, rng: np.random.Generator
+) -> Trainer:
     """A trainer that shows a copy of the model only the words in one niche."""
     words = tuple(w for w in data.train if niche.has(w))
     narrow = Dataset(data.vocab, words, data.val)
     return Trainer(
         model.copy(),
         narrow,
-        np.random.default_rng([seed, 6]),
+        rng,
         steps=STEPS,
         batch_size=min(16, len(words)),
         lr=LEARNING_RATE,
     )
+
+
+def drift(model: Transformer, start: Transformer) -> float:
+    """How far a model's weights have moved from where they started, relative to their size."""
+    moved = sum(float(((model.params[k] - start.params[k]) ** 2).sum()) for k in start.params)
+    size = sum(float((start.params[k] ** 2).sum()) for k in start.params)
+    return (moved / size) ** 0.5
 
 
 def share(words: list[str], niche: Niche) -> float:

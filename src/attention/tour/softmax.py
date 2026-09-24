@@ -33,15 +33,18 @@ def run(stage: Stage, lab: Lab) -> None:
     )
     stage.say("Say the model scored five letters like this:", gap=False)
     stage.console.print()
-    stage.play(steps(lab), fps=1, start="work it out")
-    stage.wait()
+    stage.play(lambda: steps(lab), fps=1, start="work it out")
 
     stage.say(
         "One more knob. Dividing the scores by a [b]temperature[/b] before softmax changes how "
-        "bold the choices are. Below 1, the favorite gets even more likely. Above 1, the "
-        "long shots catch up. Watch:"
+        "bold the choices are. A temperature below 1 stretches the scores apart: at 0.5, "
+        "scores of 2 and 1 become 4 and 2. Since e to the power of something turns gaps into "
+        "ratios, the favorite pulls even further ahead. Above 1 squeezes them together: at 2, "
+        "they become 1 and 0.5, and the long shots catch up. Turn it all the way up and every "
+        "letter gets an even share; all the way down and the top score takes everything. "
+        "Watch:"
     )
-    stage.play(temperatures(lab), fps=20, start="turn the dial")
+    stage.play(lambda: temperatures(lab), fps=20, start="turn the dial")
     stage.say(
         "You'll get to play with the temperature once your model is trained. Here's softmax "
         "itself, as your model runs it:"

@@ -18,7 +18,7 @@ def title(stage: Stage) -> None:
     stage.clear()
     stage.console.print()
     stage.show(viz.wordmark(), gap=False)
-    stage.play(typing(TAGLINE, f"italic {viz.FAINT}", 0.02), start=None)
+    stage.play(lambda: typing(TAGLINE, f"italic {viz.FAINT}", 0.02), start=None, then=None)
     stage.say(
         "Large language models like ChatGPT and Claude write by doing one thing over and over: "
         "guessing what comes next. In the next few minutes you'll build a very small one, "
