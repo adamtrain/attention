@@ -72,7 +72,8 @@ def run(stage: Stage, lab: Lab) -> None:
     stage.note(
         "Your model will actually train with Adam, a refinement of gradient descent that gives "
         "each weight momentum (it keeps rolling the way it has been going) and its own step "
-        "size. It's what nearly every language model trains with."
+        "size. Nearly every language model trains with it, or with AdamW, a variant you'll "
+        "meet a couple of chapters from now."
     )
 
 

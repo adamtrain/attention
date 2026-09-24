@@ -40,7 +40,7 @@ class Run:
         data = lab.data
         config = Config(len(data.vocab), data.context, width=WIDTH, heads=2, hidden=HIDDEN)
         model = Transformer.create(config, lab.dice(7))
-        trainer = Trainer(model, data, lab.dice(8), steps=STEPS)
+        trainer = Trainer(model, data, lab.dice(8), steps=STEPS, decay=0.0)
         run = cls(trainer, set(data.train), lab.dice(9))
         run.check()
         return run
@@ -68,9 +68,10 @@ def run(stage: Stage, lab: Lab) -> None:
     c, tr = lab.corpus, lab.trainer
     stage.say(
         f"Why did training stop at {tr.steps} steps? And why such a small model? Let's break "
-        "both rules and see. Here's a model about three and a half times bigger "
+        "the rules and see. Here's a model about three and a half times bigger "
         f"({WIDTH} numbers per token instead of {lab.model.config.width}), trained four times as "
-        f"long, on the same {len(lab.data.train)} {c.plural}. Your own model isn't touched."
+        "long, and without a safeguard called weight decay that your model had (more on it "
+        f"below), on the same {len(lab.data.train)} {c.plural}. Your own model isn't touched."
     )
     stage.say(
         "Watch the two lines: [accent]training loss[/accent] on the words it studies, and "
@@ -105,9 +106,17 @@ def run(stage: Stage, lab: Lab) -> None:
     stage.say(
         "It [b]memorized[/b] its training words instead of learning what they have in common, "
         "so it got better at the test it had already seen and worse at everything else. That's "
-        "called [b]overfitting[/b]. Your model avoided it by being small and stopping in time "
-        f"(its held-back loss ended at {yours:.2f}), which is why the dashboard kept an eye on "
-        "the held-back words."
+        "called [b]overfitting[/b], and it's why the dashboard kept an eye on the held-back "
+        f"words. Yours ended at {yours:.2f}. It had three defenses: it's smaller, it stopped "
+        "sooner, and it used weight decay."
+    )
+    stage.say(
+        "[b]Weight decay[/b] shrinks every weight a little toward zero, every step. A weight "
+        "only stays big if the gradient keeps pushing it back up. Memorizing one particular "
+        "word takes weights that only that word pushes on, now and then, so they wear away. "
+        "Patterns that help lots of words get pushed on at every step, so they survive. Adam "
+        "with weight decay is called [b]AdamW[/b], and it's what nearly every language model "
+        "trains with."
     )
     stage.note(
         "The real cure is more data. Large language models learn from so much text that they "
@@ -136,9 +145,9 @@ def view(lab: Lab, big: Run, yours: float, width: int) -> Table:
     plot = viz.Plot(plot_w, 10, x_max=STEPS, lo=0.0, hi=float(np.ceil(hi * 2) / 2))
     plot.guide(uniform, viz.FAINT, "guessing")
     plot.guide(yours, viz.GREEN, "your model")
-    plot.line(big.val, viz.AMBER)
     if tr.losses:
         plot.line(list(enumerate(smooth(tr.losses, 0.08), 1)), viz.ACCENT)
+    plot.line(big.val, viz.AMBER)  # on top: it's the one that counts
     at, low = big.best
     if tr.step_number > at + 120:
         plot.mark(at, low, "▼", f"bold {viz.GREEN}")

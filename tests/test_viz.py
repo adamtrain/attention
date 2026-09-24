@@ -27,6 +27,23 @@ def test_plots_are_the_size_asked_for():
     assert "half" in "".join(line.plain for line in lines)
 
 
+def test_where_lines_cross_the_later_one_keeps_its_own_color():
+    plot = viz.Plot(10, 2, x_max=1, lo=0, hi=1)
+    plot.line([(0, 0.5), (1, 0.5)], "red")
+    plot.line([(0, 0.5), (1, 0.5), (1, 0)], "blue")
+    for line in plot.render(labels=False):
+        for span in line.spans:
+            assert str(span.style) == "blue"  # every shared cell went to blue, dots and all
+
+    alone = viz.Plot(10, 2, x_max=1, lo=0, hi=1)
+    alone.line([(0, 1), (1, 1)], "red")
+    alone.line([(0, 0), (1, 0)], "blue")
+    assert {str(s.style) for line in alone.render(labels=False) for s in line.spans} == {
+        "red",
+        "blue",
+    }
+
+
 def test_colors_mix_and_ramps_stay_in_range():
     assert viz.mix("#000000", "#ffffff", 0.5) == "#808080"
     assert viz.SIGNED.color(-5) == viz.SIGNED.color(0)

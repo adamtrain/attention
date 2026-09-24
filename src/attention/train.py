@@ -14,6 +14,7 @@ from .model import LAYERS, PARTS, Array, Config, Transformer, cross_entropy
 STEPS = 400
 BATCH = 32
 LEARNING_RATE = 0.01
+WEIGHT_DECAY = 2.0  # strong, because the model has more weights than it has letters to learn
 
 
 class Adam:
@@ -22,10 +23,20 @@ class Adam:
     Momentum: each weight keeps a running average of its recent gradients, so noise from one
     batch to the next cancels out. Scale: each weight also tracks how big its gradients tend to
     be, and steps by roughly the same amount whether they're large or tiny.
+
+    With `decay`, every step also shrinks each weight a little toward zero, so only weights
+    the gradient keeps pushing on stay big. That's weight decay, and Adam with it is AdamW.
+    The norms' weights are left alone: they're scales that start at 1, not patterns.
     """
 
-    def __init__(self, params: dict[str, Array], betas: tuple[float, float] = (0.9, 0.99)):
+    def __init__(
+        self,
+        params: dict[str, Array],
+        betas: tuple[float, float] = (0.9, 0.99),
+        decay: float = 0.0,
+    ):
         self.b1, self.b2 = betas
+        self.decay = decay
         self.m = {k: np.zeros_like(v) for k, v in params.items()}
         self.v = {k: np.zeros_like(v) for k, v in params.items()}
         self.t = 0
@@ -43,6 +54,8 @@ class Adam:
             m = self.m[name] / (1 - self.b1**self.t)
             v = self.v[name] / (1 - self.b2**self.t)
             moved[name] = -lr * m / (np.sqrt(v) + 1e-8)
+            if self.decay and not name.endswith(".norm"):
+                moved[name] -= lr * self.decay * w
             w += moved[name]
         return moved
 
@@ -73,13 +86,14 @@ class Trainer:
     steps: int = STEPS
     batch_size: int = BATCH
     lr: float = LEARNING_RATE
+    decay: float = WEIGHT_DECAY
     step_number: int = 0
     losses: list[float] = field(default_factory=list)
     val_losses: list[tuple[int, float]] = field(default_factory=list)
     optimizer: Adam = field(init=False)
 
     def __post_init__(self) -> None:
-        self.optimizer = Adam(self.model.params)
+        self.optimizer = Adam(self.model.params, decay=self.decay)
 
     @property
     def done(self) -> bool:

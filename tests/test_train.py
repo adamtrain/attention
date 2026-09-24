@@ -45,6 +45,14 @@ def test_adam_moves_against_the_gradient():
     np.testing.assert_allclose(np.abs(moved["w"]), 0.1, rtol=1e-6)  # the first step is ±lr
 
 
+def test_weight_decay_shrinks_weights_but_not_the_norms():
+    params = {"mlp.up": np.ones((2, 2)), "mlp.norm": np.ones(2)}
+    adam = Adam(params, decay=2.0)
+    adam.step(params, {k: np.zeros_like(v) for k, v in params.items()}, lr=0.01)
+    assert np.allclose(params["mlp.up"], 0.98)  # no gradient at all, and it still shrank
+    assert np.allclose(params["mlp.norm"], 1.0)
+
+
 def test_learning_rate_warms_up_then_decays():
     trainer = prepare(built_in("names"), seed=0, steps=100)
     first = trainer.learning_rate()

@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/hero.svg" width="860" alt="The live pretraining dashboard at step 180 of 400. A braille loss curve has fallen from 3.3 to 1.6, below dashed lines for what counting letters and counting letter pairs would score, with the held-back loss in amber. Beside it, freshly invented dinosaurs such as Buegoceraton and Prhiatosaurus, and bars for how hard backprop is pushing on each layer. Below, the model's guess after '.stegosa' (u, 99%), a heatmap of the token embeddings, and a red and green heatmap of how much each embedding moved on this step.">
+  <img src="docs/hero.svg" width="860" alt="The live pretraining dashboard at step 180 of 400. A braille loss curve has fallen from 3.3 to 1.68, below dashed lines for what counting letters and counting letter pairs would score, with the held-back loss in amber just above it at 1.95. Beside it, freshly invented dinosaurs such as Baralosaurus and Anlaphosaurus, and bars for how hard backprop is pushing on each layer. Below, the model's guess after '.stegosa' (u, 93%), a heatmap of the token embeddings, and a red and green heatmap of how much each embedding moved on this step.">
 </p>
 
 ## Why attention
@@ -81,7 +81,7 @@ towns**, each a few hundred real examples. Then you go through fifteen short cha
 | 7 | **Backpropagation** | The chain rule on one neuron, then the gradient flowing back through the transformer. |
 | 8 | **Gradient descent** | Three learning rates race down a landscape; then one real step on your model. |
 | 9 | **Pretraining** | The live dashboard above: 400 steps, from gibberish to dinosaurs. |
-| 10 | **Memorizing** | A model too big, trained too long: overfitting, and why yours stopped when it did. |
+| 10 | **Memorizing** | A model too big, trained too long, without weight decay: overfitting, and what kept yours from it. |
 | 11 | **What it learned** | Before and after: every quiz, a map of the embeddings, and each attention head. |
 | 12 | **Inference** | Writing one letter at a time with the dice roll shown; the KV cache and the context window; temperature and top-p; hallucination. |
 | 13 | **Under the microscope** | Backprop after training: which letters swayed a prediction, and what one step of learning would change. |
@@ -122,7 +122,7 @@ held-back words climbs past pure guessing, and nearly everything it writes is a 
 dart. You see where each head looked and what it expected at every letter.
 
 <p align="center">
-  <img src="docs/inference.svg" width="760" alt="Chapter 12, Inference. The word so far is '.stine' plus a new 'r'. Two rows show where each attention head looked, as shaded letter tiles. Bars show the next letter's probabilities: r 61%, n 9.0%, p 5.9%, l 5.9%, c 4.5%. Below, a strip of colored segments from 0 to 1, one per letter and as wide as its probability, with an amber marker at 0.38 landing in the wide purple 'r' segment.">
+  <img src="docs/inference.svg" width="760" alt="Chapter 12, Inference. The word so far is '.stina' plus a new 's'. Two rows show where each attention head looked, as shaded letter tiles. Bars show the next letter's probabilities: s 61%, r 9.4%, n 6.2%, c 4.6%, h 4.4%. Below, a strip of colored segments from 0 to 1, one per letter and as wide as its probability, with an amber marker at 0.38 landing in the wide 's' segment.">
 </p>
 
 **Fine-tuning.** A copy of your model trains a little more on one family of words, like the
@@ -130,7 +130,7 @@ horned *-ceratops* dinosaurs, and its inventions follow. Then you pick the words
 watch the odds of writing them jump: learning from feedback, in miniature.
 
 <p align="center">
-  <img src="docs/finetuning.svg" width="760" alt="Chapter 14, Fine-tuning. Two columns of invented dinosaurs. Before, 8% end in -ceratops: Annacon, Tiloraceus, Muenngosetaurus and others. After fine-tuning on the -ceratops family, 68% do, with the ending highlighted in green: Apuroceratops, Masutoceratops, Nasaceratops, and Protoceratops, marked as copied from the training data.">
+  <img src="docs/finetuning.svg" width="760" alt="Chapter 14, Fine-tuning. Two columns of invented dinosaurs. Before, 2% end in -ceratops: Annajuoptor, Pachonosphosaurus, Saimisaurus and others. After fine-tuning on the -ceratops family, 82% do, with the ending highlighted in green: Kosuiceratops, Vachuriloceratops, Anchaeoceratops, Pediceratops and more, every one of them new.">
 </p>
 
 ### A note on backprop at inference
@@ -160,7 +160,7 @@ attention clean                    # delete it when you're done
 ```
 
 <p align="center">
-  <img src="docs/commands.svg" width="720" alt="Two commands. 'attention generate -n 6' prints six invented dinosaurs from a model named Sukusaurus, among them Drocosaurus and Sinhodosaurus, each marked with a green star, and '6 invented, 0 straight from the training data'. 'attention explain stegosa --teach e' shows where each head looked, the next-letter bars (u 99%), which input letters mattered most (the final s and a, 37% and 48%), and a before-and-after table in which one step of learning at rate 0.05 lifts 'e' from 0.1% to 75%.">
+  <img src="docs/commands.svg" width="720" alt="Two commands. 'attention generate -n 6' prints six invented dinosaurs from a model named Pelosaurus, among them Temankosaurus and Cierokosaurus, each marked with a green star, and '6 invented, 0 straight from the training data'. 'attention explain stegosa --teach e' shows where each head looked, the next-letter bars (u 96%), which input letters mattered most (the final s and a, 31% and 36%), and a before-and-after table in which one step of learning at rate 0.02 lifts 'e' from 0.5% to 77%.">
 </p>
 
 A ✦ marks a word that isn't in the training data: the model invented it. A · marks one it
@@ -219,7 +219,7 @@ The model is a one-block, GPT-style transformer, written out by hand in NumPy:
 | **Tokens** | Single characters, plus `.` for the start and end of a word |
 | **Architecture** | Token and position embeddings, then RMSNorm → 2-head causal self-attention → RMSNorm → MLP (16 → 64 → 16, ReLU), each with a residual connection, then RMSNorm → unembedding |
 | **Size** | 16 numbers per token, and a little over 4,000 parameters (the exact count depends on the word list) |
-| **Training** | 400 steps of Adam, 32 words a step, learning rate 0.01 with a short warmup and a decay. A tenth of the words are held back to measure real progress rather than memorization |
+| **Training** | 400 steps of AdamW (Adam with weight decay 2), 32 words a step, learning rate 0.01 with a short warmup, then easing down to 0.001. A tenth of the words are held back to measure real progress rather than memorization |
 | **Baselines** | The dashboard's dashed lines are what you'd score with no neural network: counting how common each letter is, and counting which letter follows which |
 
 There's no autograd library. Each layer has a forward function and a backward function, the
@@ -252,7 +252,7 @@ with fixed seeds.
 ```
 src/attention/
 ├── model.py      # the transformer: every layer's forward and backward pass, by hand
-├── train.py      # batches, Adam, the training loop, the no-network baselines
+├── train.py      # batches, AdamW, the training loop, the no-network baselines
 ├── generate.py   # sampling, one dice roll at a time
 ├── explain.py    # backprop after training: which letters mattered, and one-step nudges
 ├── finetune.py   # fine-tuning on a niche, and learning from feedback

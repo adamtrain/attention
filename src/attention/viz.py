@@ -242,13 +242,16 @@ BRAILLE = ((0x01, 0x08), (0x02, 0x10), (0x04, 0x20), (0x40, 0x80))
 
 
 class Plot:
-    """A line chart drawn with braille dots: each character cell holds 2×4 of them."""
+    """A line chart drawn with braille dots: each character cell holds 2×4 of them.
+
+    A cell can only have one color, so where lines cross, the one drawn last owns the cell and
+    only its dots show there. Nothing is ever drawn in another line's color.
+    """
 
     def __init__(self, width: int, height: int, x_max: float, lo: float, hi: float):
         self.width, self.height = width, height
         self.x_max, self.lo, self.hi = max(x_max, 1e-9), lo, hi
-        self.dots = np.zeros((height * 4, width * 2), dtype=bool)
-        self.colors: list[list[str | None]] = [[None] * width for _ in range(height)]
+        self.layers: list[tuple[np.ndarray, str]] = []  # each line's dots, and its color
         self.guides: list[tuple[int, str, str]] = []
         self.marks: list[tuple[int, int, str, str]] = []
 
@@ -258,19 +261,22 @@ class Plot:
         py = round((1 - frac) * (self.height * 4 - 1))
         return px, py
 
-    def _dot(self, px: int, py: int, color: str) -> None:
-        if 0 <= px < self.width * 2 and 0 <= py < self.height * 4:
-            self.dots[py, px] = True
-            self.colors[py // 4][px // 2] = color
-
     def line(self, points: Sequence[tuple[float, float]], color: str) -> None:
+        """Draw a line through the points. Later lines are drawn on top of earlier ones."""
+        dots = np.zeros((self.height * 4, self.width * 2), dtype=bool)
+
+        def dot(px: int, py: int) -> None:
+            if 0 <= px < self.width * 2 and 0 <= py < self.height * 4:
+                dots[py, px] = True
+
         pts = [self._xy(x, y) for x, y in points]
         if len(pts) == 1:
-            self._dot(*pts[0], color)
+            dot(*pts[0])
         for (x0, y0), (x1, y1) in pairwise(pts):
             n = max(abs(x1 - x0), abs(y1 - y0), 1)
             for i in range(n + 1):
-                self._dot(round(x0 + (x1 - x0) * i / n), round(y0 + (y1 - y0) * i / n), color)
+                dot(round(x0 + (x1 - x0) * i / n), round(y0 + (y1 - y0) * i / n))
+        self.layers.append((dots, color))
 
     def guide(self, y: float, color: str, label: str = "") -> None:
         """A dashed horizontal line, for comparison."""
@@ -296,10 +302,9 @@ class Plot:
             guide = guide_rows.get(row)
             chars: list[tuple[str, str | None]] = []
             for col in range(self.width):
-                block = self.dots[row * 4 : row * 4 + 4, col * 2 : col * 2 + 2]
-                bits = sum(BRAILLE[r][c] for r in range(4) for c in range(2) if block[r, c])
+                bits, color = self._cell(row, col)
                 if bits:
-                    chars.append((chr(0x2800 + bits), self.colors[row][col]))
+                    chars.append((chr(0x2800 + bits), color))
                 elif guide:
                     chars.append(("╌", guide[0]))
                 else:
@@ -318,6 +323,14 @@ class Plot:
                 line.append(ch, style=color or "")
             lines.append(line)
         return lines
+
+    def _cell(self, row: int, col: int) -> tuple[int, str | None]:
+        """The braille dots in one character cell, from the topmost line that passes through."""
+        for dots, color in reversed(self.layers):
+            block = dots[row * 4 : row * 4 + 4, col * 2 : col * 2 + 2]
+            if block.any():
+                return sum(BRAILLE[r][c] for r in range(4) for c in range(2) if block[r, c]), color
+        return 0, None
 
 
 # ── A canvas for diagrams ─────────────────────────────────────────────────────

@@ -28,6 +28,7 @@ def niche_trainer(
         steps=STEPS,
         batch_size=min(16, len(words)),
         lr=LEARNING_RATE,
+        decay=0.0,  # pulling a pretrained model's weights toward zero would only make it forget
     )
 
 

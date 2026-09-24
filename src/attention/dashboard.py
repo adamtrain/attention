@@ -111,10 +111,10 @@ class Watch:
         plot = viz.Plot(plot_w, 8, x_max=tr.steps, lo=lo, hi=hi)
         plot.guide(b.letters, viz.FAINT, "letter counts")
         plot.guide(b.pairs, viz.FAINT, "letter pairs")
-        if tr.val_losses:
-            plot.line(tr.val_losses, viz.AMBER)
         if smoothed:
             plot.line(list(enumerate(smoothed, 1)), viz.ACCENT)
+        if tr.val_losses:
+            plot.line(tr.val_losses, viz.AMBER)  # on top: it's the one that counts
         now = smoothed[-1] if smoothed else tr.val_losses[0][1]
         val = tr.val_losses[-1][1] if tr.val_losses else now
         legend = Text.assemble(
