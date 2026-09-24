@@ -36,14 +36,14 @@ def run(stage: Stage, lab: Lab) -> None:
     word = c.example
     stage.say(f"So this is {display(word)}, as the model sees it:")
     ids = vocab.sequence(word)
-    stage.play(spell(lab, ids, stage.width), fps=14)
+    stage.show(tiles(vocab, ids, stage.width))
     stage.wait()
 
     stage.say(
         "The model's whole job is to [b]predict the next token[/b]. That makes every word "
         f"a little set of quizzes. {display(word)} is {len(word) + 1} of them:"
     )
-    stage.play(quizzes(lab, ids), fps=10)
+    stage.play(quizzes(lab, ids), fps=10, start="see every quiz")
     stage.say(
         "When the answer is `.`, the word is finished. That's how the model will know when to stop."
     )
@@ -56,7 +56,7 @@ def run(stage: Stage, lab: Lab) -> None:
         f"often, glue it into one new token, and repeat. Here it is, running on your {c.plural}:"
     )
     merges = bpe.learn(c.words, MERGES)
-    stage.play(merging(lab, merges), fps=4)
+    stage.play(merging(lab, merges), fps=4, start="watch it merge")
     before, after = bpe.average_length(c.words, []), bpe.average_length(c.words, merges)
     stage.say(
         f"After {len(merges)} merges, the average {c.noun} takes {after:.1f} tokens instead of "
@@ -81,11 +81,6 @@ def word_grid(lab: Lab, width: int) -> Table:
     for start in range(0, len(words) - cols + 1, cols):
         grid.add_row(*(Text(display(w), style="italic") for w in words[start : start + cols]))
     return grid
-
-
-def spell(lab: Lab, ids: list[int], width: int) -> Iterator[Frame]:
-    for n in range(1, len(ids) + 1):
-        yield Text("\n").join(tiles(lab.vocab, ids[:n], width))
 
 
 def quizzes(lab: Lab, ids: list[int]) -> Iterator[Frame]:
@@ -145,7 +140,7 @@ def merging(lab: Lab, merges: list[bpe.Merge]) -> Iterator[Frame]:
         )
         return Group(head, Text(""), rows, Text(""), stats, newest)
 
-    yield hold(frame(0), 1.5)
+    yield frame(0)
     for done, m in enumerate(merges, 1):
         seqs = [bpe.merge_pair(seq, m.left, m.right) for seq in seqs]
         for w in shown:

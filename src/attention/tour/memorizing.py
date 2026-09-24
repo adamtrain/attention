@@ -74,14 +74,15 @@ def run(stage: Stage, lab: Lab) -> None:
     stage.say(
         "Watch the two lines: [accent]training loss[/accent] on the words it studies, and "
         f"[amber]held-back loss[/amber] on the {c.plural} it never sees. And watch how many of "
-        "its samples are [b]copies[/b] of words it trained on."
+        "its samples are [b]copies[/b] of words it trained on. The green line is your own "
+        "model's held-back loss, for comparison."
     )
-    stage.wait("break the rules")
 
     big = Run.start(lab)
     yours = tr.val_losses[-1][1] if tr.val_losses else lab.baselines.pairs
     if stage.animate:
         with stage.live() as live:
+            stage.ready(live, view(lab, big, yours, stage.width), "break the rules")
             start = time.monotonic()
             seconds = SECONDS / stage.speed
             hurry = False

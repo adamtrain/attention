@@ -42,16 +42,14 @@ def run(stage: Stage, lab: Lab) -> None:
         f"of it training on just those {len(examples)}, for {STEPS} small steps, with a learning "
         f"rate about a third of pretraining's ({LEARNING_RATE} instead of {PRETRAINING_RATE}):"
     )
-    stage.wait("fine-tune")
 
     trainer = niche_trainer(lab.model, data, niche, lab.seed)
     samples = before_words[:SAMPLES]
     if stage.animate:
         with stage.live() as live:
+            stage.ready(live, progress(trainer, samples, before, niche.ending), "fine-tune it")
             start = time.monotonic()
             hurry = False
-            live.update(stage.pad(progress(trainer, samples, before, niche.ending)), refresh=True)
-            stage.pressed(1.0)
             while not trainer.done:
                 target = STEPS * min(1.0, (time.monotonic() - start) / (SECONDS / stage.speed))
                 trainer.step()

@@ -30,9 +30,8 @@ def run(stage: Stage, lab: Lab) -> None:
         "throwing a dart. Likely letters are wide targets, unlikely ones narrow. Watch your "
         f"model invent a {lab.corpus.noun} (temperature {TEMPERATURE}):"
     )
-    stage.wait("generate")
     steps = list(picks(lab.model, lab.vocab, lab.rng, TEMPERATURE))
-    stage.play(writing(lab, steps, stage.width), fps=4)
+    stage.play(writing(lab, steps, stage.width), fps=4, start="throw the dart")
     stage.wait()
 
     n = len(steps)

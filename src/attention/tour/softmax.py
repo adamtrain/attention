@@ -33,7 +33,7 @@ def run(stage: Stage, lab: Lab) -> None:
     )
     stage.say("Say the model scored five letters like this:", gap=False)
     stage.console.print()
-    stage.play(steps(lab), fps=1)
+    stage.play(steps(lab), fps=1, start="work it out")
     stage.wait()
 
     stage.say(
@@ -41,7 +41,7 @@ def run(stage: Stage, lab: Lab) -> None:
         "bold the choices are. Below 1, the favorite gets even more likely. Above 1, the "
         "long shots catch up. Watch:"
     )
-    stage.play(temperatures(lab), fps=20)
+    stage.play(temperatures(lab), fps=20, start="turn the dial")
     stage.say(
         "You'll get to play with the temperature once your model is trained. Here's softmax "
         "itself, as your model runs it:"

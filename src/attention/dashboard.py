@@ -233,17 +233,23 @@ def run(
     width: int,
     seconds: float,
     interrupted: Callable[[float], bool],
+    ready: Callable[[RenderableType], None] | None = None,
 ) -> float:
     """Train to the end, redrawing as it goes. Early steps get more screen time than later ones.
 
     `interrupted(timeout)` waits up to `timeout` seconds and says whether to hurry up and
-    finish. Returns how long training took.
+    finish. `ready(frame)`, if given, shows the untrained starting point and waits until the
+    viewer is ready to go. Returns how long training took.
     """
     tr = watch.trainer
     fps = 15
+    if ready is not None:
+        ready(watch.render(width))
+        hurry = seconds <= 0
+    else:
+        update(watch.render(width))
+        hurry = seconds <= 0 or interrupted(min(1.5, seconds / 10) if seconds > 0 else 0)
     start = time.monotonic()
-    update(watch.render(width))
-    hurry = seconds <= 0 or interrupted(min(1.5, seconds / 10) if seconds > 0 else 0)
     while not tr.done:
         if hurry:
             watch.step()

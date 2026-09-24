@@ -133,18 +133,40 @@ class Stage:
             raise Quit
         return key
 
-    def wait(self, hint: str = "continue") -> str | None:
-        """Pause until the viewer presses a key (or, on autopilot, for a moment)."""
-        if self.keys is None and self.auto is None:
-            return None
-        prompt = Text.assemble(
-            ("  › ", viz.ACCENT), ("space", "bold"), (f" to {hint}  ·  ", viz.FAINT), ("q", "bold"),
+    @property
+    def patient(self) -> bool:
+        """Is there someone to wait for (or an autopilot standing in for them)?"""
+        return self.keys is not None or self.auto is not None
+
+    def prompt(self, hint: str) -> Text:
+        return Text.assemble(
+            ("› ", viz.ACCENT), ("space", "bold"), (f" to {hint}  ·  ", viz.FAINT), ("q", "bold"),
             (" to quit", viz.FAINT),
         )  # fmt: skip
-        with Live(prompt, console=self.console, auto_refresh=False, transient=True):
-            if self.keys:
-                self.keys.drain()
-            return self._key(self.auto / self.speed if self.auto is not None else None)
+
+    def _await(self) -> str | None:
+        if self.keys:
+            self.keys.drain()
+        return self._key(self.auto / self.speed if self.auto is not None else None)
+
+    def wait(self, hint: str = "continue") -> str | None:
+        """Pause until the viewer presses a key (or, on autopilot, for a moment)."""
+        if not self.patient:
+            return None
+        with Live(
+            self.pad(self.prompt(hint)), console=self.console, auto_refresh=False, transient=True
+        ):
+            return self._await()
+
+    def ready(self, live: Live, frame: RenderableType, hint: str) -> None:
+        """Show an animation's opening frame with a prompt under it, and wait for the go-ahead.
+
+        That way the viewer can finish reading, and make sense of the picture, before it moves.
+        """
+        if self.patient:
+            live.update(self.pad(Group(frame, Text(""), self.prompt(hint))), refresh=True)
+            self._await()
+        live.update(self.pad(frame), refresh=True)
 
     def sleep(self, seconds: float) -> bool:
         """Wait a moment. Returns True if a key cut it short."""
@@ -152,10 +174,14 @@ class Stage:
             return False
         return self._key(seconds / self.speed) is not None
 
-    def play(self, frames: Iterable[Frame], fps: float = 12.0) -> None:
+    def play(
+        self, frames: Iterable[Frame], fps: float = 12.0, start: str | None = "play it"
+    ) -> None:
         """Show an animation. Any key skips to the end; the last frame stays on screen.
 
-        Frames can be a renderable (shown for 1/fps seconds) or (renderable, seconds).
+        With `start`, the opening frame waits for a key before the rest plays, and `start` is
+        the prompt ("space to …"). Frames can be a renderable (shown for 1/fps seconds) or
+        (renderable, seconds).
         """
         last: RenderableType | None = None
         if not self.animate:
@@ -166,9 +192,12 @@ class Stage:
             return
         skipping = False
         with Live(console=self.console, auto_refresh=False, transient=False) as live:
-            for frame in frames:
+            for i, frame in enumerate(frames):
                 last, seconds = frame if isinstance(frame, tuple) else (frame, 1 / fps)
                 if skipping:
+                    continue
+                if i == 0 and start:
+                    self.ready(live, last, start)  # they've had a good look at this one already
                     continue
                 live.update(self.pad(last), refresh=True)
                 skipping = self._key(seconds / self.speed) is not None

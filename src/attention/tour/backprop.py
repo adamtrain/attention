@@ -32,9 +32,7 @@ def run(stage: Stage, lab: Lab) -> None:
         "[b]b[/b], a prediction [b]p = w·x + b[/b], and a loss [b]L = (p − y)²[/b], where "
         "[b]y[/b] is the right answer."
     )
-    stage.wait("run it forward, then backward")
-
-    stage.play(graph_story(), fps=1)
+    stage.play(graph_story(), fps=1, start="run it forward, then backward")
     stage.say(
         "Each number in amber is a [b]gradient[/b]: how much the loss would change if that "
         "number were nudged up a little. w's is −8, so nudging w up by 0.01 would cut the "
@@ -51,7 +49,7 @@ def run(stage: Stage, lab: Lab) -> None:
         ("w ← w − ", "bold"), (f"{LR}", f"bold {viz.AMBER}"), (" × ∂L/∂w", "bold"),
         ("      b ← b − ", "bold"), (f"{LR}", f"bold {viz.AMBER}"), (" × ∂L/∂b", "bold"),
     ))  # fmt: skip
-    stage.play(descent(), fps=1)
+    stage.play(descent(), fps=1, start="take the steps")
     stage.say(
         "The prediction closes in on the right answer, 3. That's learning. Everything else "
         "is scale: your transformer does exactly this with its thousands of weights."
@@ -75,7 +73,7 @@ def run(stage: Stage, lab: Lab) -> None:
         "other score gets pushed [red]down[/red], a little, in proportion to how likely the "
         "model thought it was."
     )
-    stage.wait("send it backwards")
+    stage.wait()
 
     loss, dlogits = cross_entropy(tr.logits, targets)
     grads, _ = lab.model.backward(tr, dlogits)
@@ -84,7 +82,7 @@ def run(stage: Stage, lab: Lab) -> None:
         "the gradient of its input and its weights, and hands the first one back to the layer "
         f"before. Here it is flowing back from the loss ({loss:.2f}) through every weight:"
     )
-    stage.play(flow(grads, stage.width), fps=8)
+    stage.play(flow(grads, stage.width), fps=8, start="send it back through the layers")
     stage.wait()
 
     stage.say(

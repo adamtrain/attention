@@ -45,12 +45,12 @@ def run(stage: Stage, lab: Lab) -> None:
     stage.say(
         "Then each position compares its query with the keys of every position, by "
         "multiplying them number by number and adding up (a [b]dot product[/b]). A big result "
-        "means a good match: look there."
+        "means a good match: look there. Here are the scores for "
+        f"{lab.corpus.example.capitalize()}, from one of your model's heads:"
     )
-    stage.wait("see it happen")
 
     raw = (tr.q[0, 0] @ tr.k[0, 0].T) / np.sqrt(lab.model.config.head_width)
-    stage.play(scoring(raw, tr.weights[0, 0], chars), fps=14)
+    stage.play(scoring(raw, tr.weights[0, 0], chars), fps=14, start="mask them and softmax them")
     stage.say(
         "Each row is one position, and each column is where it might look. The dots are the "
         "[b]causal mask[/b]: a position can't look ahead at letters that haven't been written "
@@ -99,7 +99,7 @@ def scoring(raw: np.ndarray, weights: np.ndarray, chars: list[str]) -> Iterator[
         )
         return Group(caption, Text(""), *score_rows(raw, weights, chars, masked, soft))
 
-    yield hold(frame(0, 0, 0), 2.2)
+    yield frame(0, 0, 0)
     for r in range(t):
         yield frame(1, r + 1, 0), 0.07
     yield hold(frame(1, t, 0), 1.2)

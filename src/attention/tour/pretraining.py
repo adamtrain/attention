@@ -27,9 +27,9 @@ def run(stage: Stage, lab: Lab) -> None:
         f"A tenth of the {c.plural} are held back, and the model never trains on them. The "
         "amber line is its loss on those, to check it's learning patterns rather than "
         "memorizing. The dashed lines are what you'd score with no neural network at all, "
-        "just by counting letters, or counting which letter follows which."
+        "just by counting letters, or counting which letter follows which. Here's your "
+        "model before its first step:"
     )
-    stage.wait("start training")
 
     watch = Watch(tr, lab.baselines, c, lab.seed, lab.rng)
     if stage.animate:
@@ -40,6 +40,7 @@ def run(stage: Stage, lab: Lab) -> None:
                 stage.width,
                 SECONDS / stage.speed,
                 stage.pressed,
+                ready=lambda frame: stage.ready(live, frame, "start training"),
             )
     else:
         train_live(watch, lambda frame: None, stage.width, 0, lambda _: False)
