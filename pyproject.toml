@@ -1,0 +1,64 @@
+[project]
+name = "attention"
+version = "0.1.0"
+description = "A guided tour of how LLMs work: build a tiny transformer, watch backprop train it, and keep it."
+readme = "README.md"
+license = "CC0-1.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Adam Train", email = "adam@adametrain.com" }
+]
+requires-python = ">=3.12"
+keywords = ["transformer", "llm", "attention", "backpropagation", "education", "tui", "numpy"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Education",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Education",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy>=2.1",
+    "rich>=15.0.0",
+    "typer>=0.27.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/adamtrain/attention"
+Repository = "https://github.com/adamtrain/attention"
+Issues = "https://github.com/adamtrain/attention/issues"
+
+[project.scripts]
+attention = "attention.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.15,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.8",
+    "ty>=0.0.83",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "C4", "PTH", "RET", "PIE"]
+# The tour's prose uses typographic characters (×, –, ’) on purpose.
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+# Chapters are mostly long strings and hand-laid tables of pictures.
+"src/attention/tour/*.py" = ["E501"]
+"src/attention/dashboard.py" = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
