@@ -230,14 +230,16 @@ def pack(panels: list[tuple[int, RenderableType]], width: int, gap: int) -> list
 FPS = 15
 
 
-def frames(watch: Watch, width: int, seconds: float) -> Iterator[tuple[RenderableType, float]]:
+def frames(
+    watch: Watch, width: int, seconds: float, fps: float = FPS
+) -> Iterator[tuple[RenderableType, float]]:
     """Train to the end, a picture at a time, taking about `seconds` if drawing keeps up.
 
-    Early steps get more screen time than later ones: that's when the most happens. The first
-    picture is the untrained model.
+    Every picture is at least one step further on, and early steps get more screen time than
+    later ones: that's when the most happens. The first picture is the untrained model.
     """
     tr = watch.trainer
-    total = max(1, round(seconds * FPS))
+    total = max(1, round(seconds * fps))
     yield watch.render(width), 1.0
     shown = 0
     while not tr.done:
@@ -246,7 +248,7 @@ def frames(watch: Watch, width: int, seconds: float) -> Iterator[tuple[Renderabl
         watch.step()
         while tr.step_number < target and not tr.done:
             watch.step()
-        yield watch.render(width), 1 / FPS
+        yield watch.render(width), 1 / fps
 
 
 def run(

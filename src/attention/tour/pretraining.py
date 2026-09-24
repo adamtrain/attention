@@ -14,7 +14,8 @@ from ..dashboard import Watch
 from .lab import Lab
 from .stage import Stage
 
-SECONDS = 28
+SECONDS = 56
+FPS = 7.5  # half the dashboard's usual pace, to follow it step by step
 
 
 def run(stage: Stage, lab: Lab) -> None:
@@ -39,7 +40,7 @@ def run(stage: Stage, lab: Lab) -> None:
         if lab.trainer.step_number:  # a replay: a new model, from new random numbers
             lab.reseed()
             watch = Watch(lab.trainer, lab.baselines, c, lab.seed, lab.rng)
-        return dashboard.frames(watch, stage.width, SECONDS)
+        return dashboard.frames(watch, stage.width, SECONDS, FPS)
 
     stage.play(training, start="start training", then="see how it did", again="train a new one")
     lab.seconds = watch.compute
