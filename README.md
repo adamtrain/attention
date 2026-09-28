@@ -2,7 +2,7 @@
 
 <p align="center">
   <b>A guided tour of how LLMs work, in your terminal.</b><br>
-  Build a tiny transformer, watch backpropagation train it, and keep the model you made.
+  Build a small language model the way the big ones are built, watch it learn, look inside it, and keep it.
 </p>
 
 <p align="center">
@@ -14,28 +14,31 @@
 </p>
 
 <p align="center">
-  <img src="docs/hero.svg" width="860" alt="The live pretraining dashboard at step 180 of 400. A braille loss curve has fallen from 3.3 to 1.68, below dashed lines for what counting letters and counting letter pairs would score, with the held-back loss in amber just above it at 1.95. Beside it, freshly invented dinosaurs such as Baralosaurus and Anlaphosaurus, and bars for how hard backprop is pushing on each layer. Below, the model's guess after '.stegosa' (u, 93%), a heatmap of the token embeddings, and a red and green heatmap of how much each embedding moved on this step.">
+  <img src="docs/hero.svg" width="860" alt="The live pretraining dashboard at step 500 of 1,200, training on fables. A braille loss chart has fallen from over 7 to below the dashed line for what counting token pairs would score, with the training loss at 4.21 and the held-back loss at 4.53. Beside it, text the model is writing, shaded token by token: The Ass and the Cat. A Ass saw a hunning in the Crow and killed an Ox and differs behind the dove, the Ass watched the Tortoise. Below, bars for how hard backprop is pushing on each layer, the likeliest next tokens after The Fox and the (Wolf 4.8%, Lion 4.8%, F, Crow, Fox, Bull), and each layer's best guess at the same spot, from the embeddings to layer 4.">
 </p>
 
 ## Why attention
 
-- **It's the real thing, just small.** A working transformer with embeddings, causal
-  self-attention, an MLP, residual connections and normalization. It has a little over 4,000
-  parameters to GPT-3's 175 billion, and it trains in about a second.
-- **You see the actual numbers.** Every picture of the transformer in the tour comes from your
-  model's own weights, activations and gradients, not from illustrations.
-- **Backprop you can follow.** The chain rule on a single neuron, one node at a time; then the
-  gradient leaving the transformer's output and flowing back through every layer; then
-  gradient descent, down a landscape and on your model.
-- **Watch it learn.** Loss curves, weights shifting, gradients per layer, and samples going
-  from gibberish to convincing dinosaurs, live.
-- **From pretraining to chatbot.** Watch an oversized model memorize instead of learn,
-  fine-tune a copy of yours toward one kind of word, nudge it with your own thumbs-up, and see
-  why a model can't tell its inventions from the real thing.
-- **Different every time.** Every run starts from new random numbers, so your model, and
-  the name it gives itself, is one of a kind.
-- **Something to keep.** When the tour ends, your model is saved, and `attention generate`
-  and `attention explain` keep working with it.
+- **It's the real design, just small.** Text split into tokens by byte-pair encoding, and a
+  four-layer transformer built like Llama: rotary position embeddings, grouped-query
+  attention, a gated (SwiGLU) MLP, RMSNorm and tied embeddings. It has about 330,000
+  parameters to Llama 3 8B's 8 billion, and it trains in a few minutes on your computer.
+- **Queries, keys and values, for real.** A soft dictionary lookup on made-up numbers, then
+  your model's real grids; why a key is not a value; and an experiment in which a two-layer
+  model grows an induction head that a one-layer model can't, showing exactly what each of
+  the three vectors is for.
+- **Layers you can see into.** The residual stream, the logit lens (what the model would guess
+  if it stopped after each layer), and what each of its sixteen heads learned to look at.
+- **Inference the way it's really done.** A working KV cache, prefill and decode, why
+  grouped-query attention exists, what API prompt caching keeps, and the dials you'll find in
+  every chatbot's API: temperature, top-k and top-p.
+- **From pretraining to chatbot.** Memorization you can watch (and pull back out of the
+  model), quantization down to 8, 4 and 2 bits, fine-tuning with and without LoRA, and a chat
+  model trained on a chat template, with the loss counting only its replies.
+- **You see the actual numbers.** Every picture comes from your model's own weights,
+  activations and gradients, not from illustrations.
+- **Something to keep.** When the tour ends, your model and its chat version are saved, and
+  `attention generate`, `attention chat` and `attention explain` keep working with them.
 - **Runs anywhere.** Pure NumPy and Rich. No GPU, no PyTorch, no downloads, no API keys.
 
 ## Install
@@ -67,70 +70,75 @@ it's about to show before it moves.
 
 ## The tour
 
-First you choose what your model will learn to invent: **dinosaurs**, **names** or **English
-towns**, each a few hundred real examples. Then you go through fifteen short chapters:
+First you choose what your model will learn to write: **fables** (Aesop, in four
+translations), **fairy tales** (the Brothers Grimm) or **Shakespeare** (scenes from eight
+plays). Then you go through twenty chapters:
 
 | | | |
 | --- | --- | --- |
-| 1 | **Tokens** | Text becomes numbers, and every word a little set of next-letter quizzes. Then byte-pair encoding, live on your word list: how real models pick their chunks. |
-| 2 | **Embeddings** | Each token looks up a vector of learned numbers, and positions get vectors too. |
-| 3 | **Attention** | Multiplying by a grid of weights and the dot product, worked through on real numbers; queries, keys and values; the causal mask; softmax. Your model's real scores, animated. |
-| 4 | **Softmax** | Scores become probabilities, and temperature makes guesses bolder or safer. |
-| 5 | **The whole model** | The full diagram, the MLP's detectors firing, residual connections and norms, where the parameters live, and the entire forward pass in about 25 lines of your model's own source. |
-| 6 | **Loss** | −log p, why being sure and wrong costs so much, and how surprised the untrained model is at every quiz. |
-| 7 | **Backpropagation** | The chain rule on one neuron, then the gradient flowing back through the transformer. |
-| 8 | **Gradient descent** | Three learning rates race down a landscape; then one real step on your model. |
-| 9 | **Pretraining** | The live dashboard above: 400 steps, from gibberish to dinosaurs. |
-| 10 | **Memorizing** | A model too big, trained too long, without weight decay: overfitting, and what kept yours from it. |
-| 11 | **What it learned** | Before and after: every quiz, a map of the embeddings, and each attention head. |
-| 12 | **Inference** | Writing one letter at a time with the dice roll shown; the KV cache and the context window; temperature and top-p; hallucination. |
-| 13 | **Under the microscope** | Backprop after training: which letters swayed a prediction, and what one step of learning would change. |
-| 14 | **Fine-tuning** | The pretraining loop with three changes: specialize a copy of your model on a handful of examples, see how little its weights move and what it forgets, and how chatbots are made. Then teach it with your own feedback. |
-| 15 | **Your model** | What you can do with it now, how it compares with GPT-3, and the whole story in one table. |
+| 1 | **Tokens** | Byte-pair encoding, live on your text: the merges, the vocabulary it builds, special tokens like `<\|endoftext\|>`, and every position as a next-token quiz. |
+| 2 | **Embeddings** | Each token looks up a row of 64 learned numbers, and the residual stream begins. |
+| 3 | **Attention** | A fuzzy dictionary lookup: queries, keys and values, first with made-up numbers, then in your model. Why three vectors, the QK and OV circuits, the causal mask, heads, and grouped-query attention. |
+| 4 | **Position** | Why attention alone can't tell order, and RoPE: turning queries and keys like clock hands, so a match depends on distance. |
+| 5 | **Softmax** | Scores become probabilities, and temperature makes guesses bolder or safer. |
+| 6 | **The stack** | The gated MLP at work, residual connections and norms, four layers stacked, where the parameters live, and your model's config.json next to Llama 3's. |
+| 7 | **Loss** | −log p, why being sure and wrong costs so much, and perplexity. |
+| 8 | **Backpropagation** | The chain rule on one neuron, then the gradient flowing back through all four layers. |
+| 9 | **Gradient descent** | Three learning rates race down a landscape; one real step; AdamW, the learning-rate schedule and gradient clipping. |
+| 10 | **Pretraining** | The live dashboard above: a few minutes of real training, with each layer's guess taking shape. |
+| 11 | **Memorizing** | A model with too little to read, for too long: overfitting, and pulling a memorized fable back out of it word for word. |
+| 12 | **What it learned** | Before and after, which tokens ended up neighbors, what each of the 16 heads looks at, and the logit lens. |
+| 13 | **Why layers stack** | A one-layer and a two-layer model race to learn in-context copying; only the two-layer one can. Then its induction head, taken apart: the clearest reason a key is not a value. |
+| 14 | **Inference** | Writing one token at a time, the dart that picks them, temperature, top-k, top-p, greedy decoding, and hallucination. |
+| 15 | **The KV cache** | Why keys and values are kept and queries aren't, prefill and decode, the speed-up measured on your model, and what the cache costs at Llama's scale. |
+| 16 | **Under the microscope** | Backprop after training: which tokens swayed a prediction, and what one step of learning would change. |
+| 17 | **Quantization** | Your model rounded to 16, 8, 4, 3 and 2 bits per weight: what it saves, what it costs, and what a Q4_K_M file is. |
+| 18 | **Fine-tuning** | A copy specializes on one kind of story, forgets a little, and then LoRA does the same with a small fraction of the numbers. |
+| 19 | **Chat** | Chat templates, special tokens and loss masks: your model learns to answer. Then you teach it with your own feedback. |
+| 20 | **Your model** | What you can do with it now, how it compares with GPT-3 and Llama 3, and the whole story in one table. |
 
-**Attention, with real numbers.** Each position scores every earlier one, the causal mask
-hides the future, and softmax turns each row into weights.
+**Queries, keys and values.** Attention is a fuzzy lookup: the query is compared with every
+key, and the answer is a blend of the values, weighted by how well each key matched. Separate
+grids let the model make asking, being found and telling three different things.
 
 <p align="center">
-  <img src="docs/attention.svg" width="760" alt="Chapter 3, Attention. A lower-triangular grid for the word '.stegosaurus', one row per position, each cell holding an attention weight such as .78 or .43 and shaded from dark to bright indigo by size. Cells above the diagonal show a faint dot for the causal mask. The caption reads '3 softmax: each row becomes weights that add up to 100%'.">
+  <img src="docs/attention.svg" width="760" alt="Chapter 3, Attention. A lookup with made-up numbers: the query [1.90, 0.40] is compared with three keys. Position 1's key [2.00, 0.10] scores +3.84 and gets 93% of the weight; position 2's scores +1.10 and gets 6%; position 3's scores -1.07 and gets 1%. The answer, each value times its weight, added up, is [0.82, -0.23]. Below, what each vector is shaped for: the query for asking, the key for being found, the value for telling what is worth passing on.">
 </p>
 
-**Backprop, step by step.** Values are computed forward and gradients backward, node by
-node, each with the rule that produced it. Then the same idea at the transformer's output: the
-gradient for each token's score is its probability, minus 1 for the right answer.
+**Why layers stack.** A one-layer and a two-layer model learn to copy from earlier in a
+string of words. Only the second can: its first layer writes “the word before me” into each
+position, and its second layer's keys read it. That's an induction head.
 
 <p align="center">
-  <img src="docs/backprop.svg" width="760" alt="Chapter 7, Backpropagation. A computation graph for p = w·x + b and L = (p − y)², with each node's value in white and its gradient in amber: w 0.50 with gradient −8.00, x 2.00 with −2.00, b 0.00 with −4.00, and so on up to L 4.00 with gradient 1.00. Below, a table for the quiz '.stegosa' → 'u': u has probability 4.0%, gradient −0.960 and a long green bar labeled 'push up'; every other letter has about +0.04 and a short red bar labeled 'push down'.">
+  <img src="docs/layers.svg" width="860" alt="Chapter 13, Why layers stack. A loss chart over 2,000 steps: a one-layer model creeps down and stalls at 2.83, while a two-layer model drops suddenly around step 600, to 0.17. Below, the two-layer model's circuit on a string of words. Layer 1's head, at the first one, lights up out, the word just before it. Layer 2's head, at the second out, lights up one. So after the second out, it predicts one: the word that came after the first one.">
 </p>
 
-**Gradient descent.** Three walkers set off down the same valley: one too timid, one about
-right, one so bold that it zigzags.
+**The logit lens.** Stop after each layer and read the residual stream as if it were the end
+of the model: some answers are clear after one layer, others only come together at the last.
 
 <p align="center">
-  <img src="docs/descent.svg" width="860" alt="Chapter 8, Gradient descent. Three contour maps of the same long valley, colored from bright purple on the slopes to near-black at the bottom, each with an amber trail of dots. With learning rate 0.05 the trail stops short, loss 0.92, 'too timid'. With 0.25 it slides straight to the green cross at the minimum, loss 0.00, 'about right'. With 0.49 it bounces from one side of the valley to the other, loss 0.31, 'too bold'.">
+  <img src="docs/lens.svg" width="860" alt="Chapter 12, What it learned. The logit lens: for each of the first ten quizzes in The Fox and the Grapes, the right answer's probability after the embeddings and after each of the four layers, shaded from dark to bright, with the top guess beside it when that isn't the answer. The word Grapes is three tokens, G, ra and pes, and pes after ra only comes together in the last layer, at 42%; the paragraph break after Grapes climbs from 9.3% after layer 2 to 71% after layer 3 and 100% after layer 4.">
 </p>
 
-**Memorizing.** Give a model too much room and too many passes, and it learns the answers
-instead of the patterns. Its loss on words it trained on keeps falling while its loss on
-held-back words climbs past pure guessing, and nearly everything it writes is a copy.
+**The KV cache.** Every layer's keys and values, kept for every position written so far, so
+that each new token only needs its own. At Llama's scale, that's gigabytes per conversation.
 
 <p align="center">
-  <img src="docs/memorizing.svg" width="860" alt="Chapter 10, Memorizing. A loss chart for a 14,752-parameter model trained for 1,600 steps. The training loss falls steadily to 0.49. The held-back loss dips to its best early on, marked with a green triangle, then climbs past a dashed 'guessing' line to 4.96, far above a green dashed line showing the user's own model. Beside it, the model's latest samples, all eight marked 'copy' in red: Patagotitan, Anchisaurus, Mochlodon and more, with a meter reading 'copies 8 of 8'.">
+  <img src="docs/cache.svg" width="760" alt="Chapter 15, The KV cache. A grid with a row for each of the last ten tokens written and, for each of the four layers, a key square and a value square for each of its two key/value heads: 12 rows kept, 3,072 numbers. Below, the cache's size in 16-bit numbers: 64 KB for yours at 128 tokens, 1 GB for Llama 3 8B at 8,192 tokens, 16 GB for a 131,072-token conversation, and 64 GB without grouped-query attention.">
 </p>
 
-**Inference.** The model runs forward, lines its probabilities up from 0 to 1, and throws a
-dart. You see where each head looked and what it expected at every letter.
+**Memorizing.** Given too little to read, for too long, a model learns its text by heart:
+start one of its fables for it, and it recites the rest.
 
 <p align="center">
-  <img src="docs/inference.svg" width="760" alt="Chapter 12, Inference. The word so far is '.stina' plus a new 's'. Two rows show where each attention head looked, as shaded letter tiles. Bars show the next letter's probabilities: s 61%, r 9.4%, n 6.2%, c 4.6%, h 4.4%. Below, a strip of colored segments from 0 to 1, one per letter and as wide as its probability, with an amber marker at 0.38 landing in the wide 's' segment.">
+  <img src="docs/memorizing.svg" width="860" alt="Chapter 11, Memorizing. A loss chart for a model trained for 1,200 steps on a twentieth of the fables, with no weight decay. Its loss on its own text falls to 0.13, while its held-back loss dips to its best early on, marked with a green triangle, then climbs past a dashed guessing line to 12.28, far above a green line for your own model. Beside it, given the opening of one of its own fables, The Frogs Asking for a King, it recites the rest word for word, shaded red; given the opening of one it never saw, The Bundle of Sticks, it writes nonsense. A meter reads recited 100%.">
 </p>
 
-**Fine-tuning.** A copy of your model trains a little more on one family of words, like the
-horned *-ceratops* dinosaurs, and its inventions follow. Then you pick the words you like and
-watch the odds of writing them jump: learning from feedback, in miniature.
+**Fine-tuning and LoRA.** A copy of your model specializes in one kind of story. LoRA does it
+by learning small corrections to a frozen model, and forgets less along the way.
 
 <p align="center">
-  <img src="docs/finetuning.svg" width="760" alt="Chapter 14, Fine-tuning. Two columns of invented dinosaurs. Before, 2% end in -ceratops: Annajuoptor, Pachonosphosaurus, Saimisaurus and others. After fine-tuning on the -ceratops family, 82% do, with the ending highlighted in green: Kosuiceratops, Vachuriloceratops, Anchaeoceratops, Pediceratops and more, every one of them new.">
+  <img src="docs/finetuning.svg" width="760" alt="Chapter 18, Fine-tuning. A table comparing full fine-tuning with rank-4 LoRA, both teaching the model fables about the Wolf: 328,256 numbers learned against 19,456; 92% of what full fine-tuning writes is about the Wolf, against 83% for LoRA; they moved the weights by 21% and 14%; the held-back loss is 5.51 against 4.48; and the file to keep is 641 KB against 38 KB.">
 </p>
 
 ### A note on backprop at inference
@@ -138,33 +146,34 @@ watch the odds of writing them jump: learning from feedback, in miniature.
 Backprop doesn't run when a model writes. Generating only runs the model forward, and its
 weights stay frozen, for your model and for chatbots alike. The tour says so, then puts
 backprop to two other uses after training. It works as a microscope: backpropagating from one
-prediction down to the input letters shows which of them swayed it. And it shows what one step
-of learning *would* do if you insisted on a different answer, on a throwaway copy of the
-model. Fine-tuning and feedback, in the chapter after, are where backprop runs for real again.
+prediction down to the tokens that went in shows which of them swayed it. And it shows what
+one step of learning *would* do if you insisted on a different answer, on a throwaway copy of
+the model. Fine-tuning, LoRA, chat and feedback are where backprop runs for real again.
 
 ## Your model
 
-Your model is saved when training ends, and it names itself after one of its own inventions.
-From then on:
+Your model is saved when training ends, and it names itself after a name it made up. From
+then on:
 
 ```sh
-attention generate                 # invent ten new dinosaurs (or names, or towns)
-attention generate -t 1.5          # ...stranger ones, at a higher temperature
-attention generate -p 0.5          # ...safer ones, only picking from the likeliest letters
-attention generate stego           # ...ones that start with "stego"
-attention explain stegosa          # one prediction up close, with backprop as a microscope
-attention explain stegosa --teach e  # ...and what one step of learning toward "e" would do
-attention info                     # everything about it, and how to make it again
-attention train                    # train a new one, with the live dashboard
-attention clean                    # delete it when you're done
+attention generate                         # write three new fables (or tales, or scenes)
+attention generate "The Fox and the"       # ...carrying on from a start you give it
+attention generate -t 1.2 -k 20 -p 0.9     # ...with the dials: temperature, top-k, top-p
+attention chat                             # talk to its chat version
+attention explain "The Fox and the"        # one prediction up close: heads, layers, backprop
+attention explain "The Fox and the" --teach Crow  # ...and one step of learning toward " Crow"
+attention tokenize "Any text at all"       # see how its tokenizer splits text
+attention info                             # everything about it, with its config.json
+attention train                            # train a new one, with the live dashboard
+attention clean                            # delete it all when you're done
 ```
 
 <p align="center">
-  <img src="docs/commands.svg" width="720" alt="Two commands. 'attention generate -n 6' prints six invented dinosaurs from a model named Pelosaurus, among them Temankosaurus and Cierokosaurus, each marked with a green star, and '6 invented, 0 straight from the training data'. 'attention explain stegosa --teach e' shows where each head looked, the next-letter bars (u 96%), which input letters mattered most (the final s and a, 31% and 36%), and a before-and-after table in which one step of learning at rate 0.02 lifts 'e' from 0.5% to 77%.">
+  <img src="docs/commands.svg" width="760" alt="Two commands. attention generate -n 1 The Fox and the carries on: The Fox and the Fox. A Horse, acrossing a tree and roaming being overtented, broke to a short time, as a large number of gold by, all the Serpent began to recover it, shaded token by token. attention explain The Fox and the shows the model, Acients, reading it: where the last token looked in each of the four layers, the likeliest next tokens (Fox 9.4%, then Lion, Wolf, Ass, Dog and Monkey), each layer's best guess from the logit lens, and which tokens mattered most, found by backprop: the last one, the, at 43%.">
 </p>
 
-A ✦ marks a word that isn't in the training data: the model invented it. A · marks one it
-reproduced from what it learned.
+In what it writes, anything shaded red is a run of twelve tokens or more copied word for word
+from its training text; the rest it made up.
 
 ### Commands and options
 
@@ -172,68 +181,93 @@ reproduced from what it learned.
 | --- | --- |
 | `attention`, `attention tour` | The guided tour |
 | `attention train` | Train a new model with the live dashboard, and save it |
-| `attention generate [START]` | Invent new words, optionally starting with some letters |
-| `attention explain START` | Watch one prediction up close |
-| `attention info` | Your model's vital statistics |
+| `attention generate [TEXT]` | Write new documents, or carry on from some text |
+| `attention chat` | Talk to the chat version of your model (made the first time, if the tour didn't) |
+| `attention explain TEXT` | Watch one prediction up close |
+| `attention tokenize TEXT` | See how your model's tokenizer splits some text |
+| `attention info` | Your model's vital statistics, config.json and weights |
 | `attention clean` | Delete everything attention has saved |
 
 | Option | |
 | --- | --- |
-| `-c, --corpus NAME` | `dinosaurs`, `names`, `towns`, or a file with one word per line (`tour`, `train`) |
+| `-c, --corpus NAME` | `fables`, `fairytales`, `shakespeare`, or a text file (`tour`, `train`) |
 | `-s, --seed N` | Make a particular model again (`tour`, `train`) |
-| `--chapter N` | Start the tour at chapter N; it trains a model first if it needs one |
+| `--chapter N` | Start the tour at chapter N; it trains a model first if it needs one, or picks up your saved one if it's the same corpus and seed |
 | `--auto` | Let the tour play by itself |
-| `--fast` | Speed up the animations (`tour`), or skip the pacing entirely (`train`) |
-| `--steps N` | Training steps (`train`, default 400) |
-| `-n, --count N` / `-t, --temperature T` | How many words, and how adventurous (`generate`) |
-| `-p, --top-p P` | Only pick from the likeliest letters that add up to P (`generate`) |
-| `--plain` | Just the words, one per line (`generate`; also the default when piped) |
-| `--teach LETTER` | Show one step of learning toward a letter (`explain`) |
+| `--fast` | Speed up the animations (`tour`), or skip the drawing entirely (`train`) |
+| `--steps N` | Training steps (`train`; the default is enough to read the text about 16 times) |
+| `-n, --count N` / `--tokens N` | How many to write, and how long each can be (`generate`) |
+| `-t, --temperature T` | How adventurous (`generate`, `chat`) |
+| `-k, --top-k K` / `-p, --top-p P` | Only pick from the k likeliest tokens, or the likeliest ones adding up to P (`generate`) |
+| `--plain` | Just the text (`generate`; also the default when piped) |
+| `--teach WORD` | Show one step of learning toward a word (`explain`) |
 | `-m, --model PATH` | Use a model file other than your saved one |
 | `-y, --yes` | Delete without asking first (`clean`) |
 
 Your model lives in `~/.local/share/attention/model.npz` (or `$XDG_DATA_HOME/attention`, or
-`%LOCALAPPDATA%\attention` on Windows; set `$ATTENTION_HOME` to put it anywhere). It's about
-40 KB: a plain NumPy archive with the weights and a small JSON card, so `numpy.load` opens it
-too.
+`%LOCALAPPDATA%\attention` on Windows; set `$ATTENTION_HOME` to put it anywhere), with its
+chat version beside it in `model.chat.npz`. Each is about 3 MB: a plain NumPy archive with the
+weights, the tokenizer's merges, the text it learned from, and a small JSON card, so
+`numpy.load` opens it too.
 
-That file is the only thing attention leaves on your computer. `attention clean` shows what it
-will delete, asks, and removes it, along with its folder if nothing else is in there. It only
-ever deletes attention's own model files, so anything else you keep in that folder stays put.
+Those files are the only things attention leaves on your computer. `attention clean` shows
+what it will delete, asks, and removes them, along with their folder if nothing else is in
+there. It only ever deletes attention's own files, so anything else you keep in that folder
+stays put.
 
-### Your own words
+### Your own text
 
-Train on any list with one word per line (letters a–z; at least 20 words, and a few hundred
-is much better):
+Train on any text file (at least 20,000 characters, and a few hundred thousand is much
+better). Separate documents with a line holding only `<|endoftext|>`, or with two blank
+lines; one long text is cut into pages:
 
 ```sh
-attention train --corpus my-words.txt
+attention train --corpus my-book.txt
 ```
 
 ## How it works
 
-The model is a one-block, GPT-style transformer, written out by hand in NumPy:
+The model is a small Llama-style transformer, written out by hand in NumPy:
 
 | | |
 | --- | --- |
-| **Tokens** | Single characters, plus `.` for the start and end of a word |
-| **Architecture** | Token and position embeddings, then RMSNorm → 2-head causal self-attention → RMSNorm → MLP (16 → 64 → 16, ReLU), each with a residual connection, then RMSNorm → unembedding |
-| **Size** | 16 numbers per token, and a little over 4,000 parameters (the exact count depends on the word list) |
-| **Training** | 400 steps of AdamW (Adam with weight decay 2), 32 words a step, learning rate 0.01 with a short warmup, then easing down to 0.001. A tenth of the words are held back to measure real progress rather than memorization |
-| **Baselines** | The dashboard's dashed lines are what you'd score with no neural network: counting how common each letter is, and counting which letter follows which |
+| **Tokens** | Byte-pair encoding learned from the training text: 2,048 tokens, of which 3 are special (`<\|endoftext\|>`, `<\|user\|>`, `<\|assistant\|>`), 96 are single characters, and 1,949 are merges. Text is cut into chunks first with GPT-2's rule, keeping runs of newlines together as GPT-4's does |
+| **Architecture** | Token embeddings, then 4 layers of: RMSNorm → causal self-attention (4 query heads sharing 2 key/value heads, with rotary position embeddings on the queries and keys) → RMSNorm → SwiGLU MLP (64 → 192 → 64), each with a residual connection. Then RMSNorm, and the embedding table again for the output |
+| **Size** | 64 numbers per token, 328,256 parameters (131,072 of them in the embedding table), and a context window of 128 tokens |
+| **Training** | AdamW (β 0.9 and 0.95, weight decay 0.1), 16 stretches of 128 tokens a step, learning rate 0.01 after a 100-step warmup, easing down along a cosine to 0.001, with the gradient clipped at 1.0. Enough steps to read the text about 16 times: about 1,200 for the fables, 2,200 for Shakespeare and 2,800 for the fairy tales. A tenth of the documents are held back, to measure real progress rather than memorization |
+| **Baselines** | The dashboard's dashed lines are what you'd score with no neural network: counting how common each token is, and counting which token follows which |
 
 There's no autograd library. Each layer has a forward function and a backward function, the
-chain rule written out one layer at a time, and the tests check every gradient against finite
-differences. The tour shows you this code: the attention block, the whole forward pass,
-softmax, and the backward pass for a matrix multiply are all excerpts from the model you
-train.
+chain rule written out one layer at a time (LoRA's too), and the tests check every gradient
+against finite differences, and check that writing with the KV cache gives exactly the same
+answers as rereading everything. The tour shows you this code: the attention block, RoPE, the
+whole forward pass, softmax, the KV cache and the backward pass for a matrix multiply are all
+excerpts from the model you train.
 
-Along the way the tour trains a few throwaway models of its own, and none of them replace
-yours: a bigger one to show overfitting, and fine-tuned copies of yours.
+Along the way the tour trains several throwaway models of its own, and none of them replace
+yours: one that memorizes, the one-layer and two-layer models that race, fine-tuned copies of
+yours, and its chat version, which is saved beside it.
 
-Every run gets a random seed, which decides the held-back words, the starting weights and the
-order of the batches. The same seed and corpus always make the same model, so
-`attention info` can tell you how to make yours again.
+Every run gets a random seed, which decides the held-back documents, the tokenizer, the
+starting weights and the order of the batches. The same seed and corpus always make the same
+model, so `attention info` can tell you how to make yours again.
+
+### The texts
+
+The three built-in corpora are public-domain books from [Project
+Gutenberg](https://www.gutenberg.org), with the licensing boilerplate, front matter, stage
+directions and footnotes taken out, and turned into plain ASCII:
+
+- **Fables**: *Three Hundred Aesop's Fables*, translated by George Fyler Townsend (1867); *The
+  Fables of Aesop*, retold by Joseph Jacobs (1894); *Aesop's Fables*, translated by V. S.
+  Vernon Jones (1912); and *The Aesop for Children* (1919). 826 fables, 594 KB.
+- **Fairy tales**: *Household Tales by Brothers Grimm*, translated by Margaret Hunt (1884).
+  210 tales, 1.5 MB.
+- **Shakespeare**: *Romeo and Juliet*, *Hamlet*, *Macbeth*, *A Midsummer Night's Dream*,
+  *Julius Caesar*, *The Tempest*, *Twelfth Night* and *Much Ado About Nothing*, from *The
+  Complete Works of William Shakespeare*. 137 scenes, 923 KB.
+
+`uv run scripts/corpora.py` downloads the books and rebuilds them.
 
 ## Development
 
@@ -243,7 +277,8 @@ uv run attention                # run from the checkout
 uv run pytest                   # run the tests
 uv run ruff check . && uv run ruff format .
 uv run ty check                 # type-check
-uv run scripts/screenshots.py   # regenerate docs/*.svg
+uv run scripts/screenshots.py   # regenerate docs/*.svg (trains real models: a few minutes)
+uv run scripts/corpora.py       # rebuild the corpora from the books
 ```
 
 The screenshots are drawn by the same code the tour and the commands use, from models trained
@@ -251,24 +286,27 @@ with fixed seeds.
 
 ```
 src/attention/
-├── model.py      # the transformer: every layer's forward and backward pass, by hand
-├── train.py      # batches, AdamW, the training loop, the no-network baselines
-├── generate.py   # sampling, one dice roll at a time
-├── explain.py    # backprop after training: which letters mattered, and one-step nudges
-├── finetune.py   # fine-tuning on a niche, and learning from feedback
-├── bpe.py        # byte-pair encoding, for the tour's look at real tokenizers
+├── tokenizer.py  # byte-pair encoding: learning merges, encoding and decoding
+├── corpus.py     # the texts, their documents, and stretches of tokens
+├── model.py      # the transformer: every layer's forward and backward pass, the KV cache, the logit lens
+├── train.py      # AdamW, the schedule, clipping, the training loop, the baselines
+├── generate.py   # writing with the KV cache, the dials, and spotting copied text
+├── induction.py  # the one-layer-against-two experiment, and finding the circuit
+├── quantize.py   # rounding weights to fewer bits
+├── finetune.py   # fine-tuning, LoRA, chat templates and loss masks, feedback
+├── explain.py    # backprop after training: which tokens mattered, and one-step nudges
 ├── scalar.py     # a tiny autograd for single numbers (the tour's neuron)
-├── corpus.py     # word lists, tokens and datasets
-├── corpora/      # dinosaurs, names and English towns
-├── store.py      # saving and loading your model
+├── store.py      # saving and loading models
 ├── dashboard.py  # the live training view
 ├── views.py      # pictures shared by the tour and the commands
 ├── viz.py        # terminal drawing: heatmaps, bars, braille plots, a canvas
 ├── keys.py       # single keypresses
 ├── cli.py        # the commands
+├── corpora/      # fables, fairy tales and Shakespeare
 └── tour/         # one module per chapter, and the stage that paces them
 ```
 
 ## License
 
-[CC0 1.0](LICENSE). attention is dedicated to the public domain.
+[CC0 1.0](LICENSE). attention is dedicated to the public domain, and so are the texts it
+learns from.

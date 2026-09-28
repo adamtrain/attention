@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import numpy as np
-from rich.console import Group
+from rich.console import Group, JustifyMethod
 from rich.table import Table
 from rich.text import Text
 
 from .. import viz
 from ..model import Transformer, cross_entropy
-from ..views import token_chip
+from ..views import chip, label
 from .lab import Lab
 from .stage import Stage
+
+QUIZZES = 14  # of the example's, shown
 
 
 def run(stage: Stage, lab: Lab) -> None:
@@ -41,23 +43,29 @@ def run(stage: Stage, lab: Lab) -> None:
     )
     stage.wait()
 
-    word = lab.corpus.example
-    stage.say(f"Here's the untrained model on every quiz in {word.capitalize()}:")
-    stage.show(quiz_losses(lab, lab.model))
+    stage.say("Here's the untrained model on the first quizzes in your example:")
+    stage.show(quiz_losses(lab, lab.model, room=stage.width))
     inputs, targets = lab.example()
     loss, _ = cross_entropy(lab.model.forward(inputs).logits, targets)
     stage.say(
         f"Untrained, it's close to the {np.log(v):.2f} of an even spread on almost every quiz: "
-        f"it's shrugging at everything. The average, {loss:.2f}, is the model's "
-        "[b]cross-entropy loss[/b] on this word. Training means exactly one thing: make that "
-        "number smaller, averaged over every quiz in every word."
+        f"it's shrugging at everything. The average over all of them, {loss:.2f}, is the "
+        "model's [b]cross-entropy loss[/b] on this passage. Training means exactly one thing: "
+        "make that number smaller, averaged over every quiz in all of the text."
+    )
+    stage.say(
+        "You'll also see models compared by [b]perplexity[/b], which is just e to the power of "
+        f"the loss. It reads as “as unsure as if choosing evenly among this many tokens”: "
+        f"right now yours is at {np.exp(loss):,.0f}, about as unsure as picking blindly from "
+        f"all {v}. A good model's perplexity is far smaller than its vocabulary."
     )
 
 
 def curve(vocab: int) -> Group:
     width, height = 44, 9
-    plot = viz.Plot(width, height, x_max=1.0, lo=0.0, hi=4.6)
-    ps = np.linspace(0.01, 1.0, 200)
+    top = float(np.ceil(np.log(vocab)))
+    plot = viz.Plot(width, height, x_max=1.0, lo=0.0, hi=top + 1)
+    ps = np.linspace(np.exp(-(top + 1)), 1.0, 300)
     plot.line(list(zip(ps, -np.log(ps), strict=True)), viz.ACCENT)
     marks = [(1 / vocab, viz.RED), (0.5, viz.AMBER), (0.9, viz.GREEN)]
     for p, color in marks:
@@ -79,37 +87,53 @@ def curve(vocab: int) -> Group:
     return Group(Text("  loss", style=viz.FAINT), *lines, axis, ticks, caption, Text(""), key)
 
 
-def quiz_losses(lab: Lab, model: Transformer, bar_width: int = 24, compact: bool = False) -> Table:
-    """The loss on every quiz in the example word. Compact leaves out the quizzes themselves."""
+def quiz_losses(
+    lab: Lab,
+    model: Transformer,
+    bar_width: int = 24,
+    compact: bool = False,
+    most: int = QUIZZES,
+    room: int = 80,
+) -> Table:
+    """The loss on the first quizzes in the example. Compact leaves out the quizzes themselves.
+
+    `room` is the width to fit in: what's left after the other columns shows the text so far.
+    """
     inputs, targets = lab.example()
     probs = model.forward(inputs).probs[0]
-    t = inputs.shape[1]
+    tok = lab.tokenizer
+    t = min(inputs.shape[1], most)
+    tiles = max(len(label(tok, int(right))) + 2 for right in targets[0, :t])
+    shown = max(8, min(22, room - tiles - bar_width - 21))  # characters of the text so far
     grid = Table.grid(padding=(0, 1))
-    for _ in range(2 if compact else 5):
-        grid.add_column(no_wrap=True)
+    columns: list[JustifyMethod] = ["right", "left"]
+    if not compact:
+        columns = ["right", "left", "left", *columns]
+    for justify in columns:
+        grid.add_column(no_wrap=True, justify=justify)
     heads = [Text("so far", style=viz.FAINT), Text(""), Text("answer", style=viz.FAINT)]
     grid.add_row(
         *([] if compact else heads),
         Text("  chance", style=viz.FAINT),
         Text("loss", style=viz.FAINT),
     )
-    top = np.log(lab.model.config.vocab) * 1.4
+    top = np.log(model.config.vocab) * 1.4
     for i in range(t):
         right = int(targets[0, i])
         p = float(probs[i, right])
         loss = -np.log(p)
-        color = viz.GREEN if loss < 1 else viz.AMBER if loss < 2.5 else viz.RED
+        color = viz.GREEN if loss < 1 else viz.AMBER if loss < 3 else viz.RED
+        so_far = tok.decode(inputs[0, max(0, i - 5) : i + 1]).replace("\n", "↵") or "‹end›"
         quiz = [
-            Text(lab.vocab.decode(inputs[0, : i + 1]), style="bold"),
+            Text(("…" if i > 5 else "") + so_far[-shown:], style="bold"),
             Text("→", style=viz.FAINT),
-            token_chip(lab.vocab, right),
+            chip(tok, right),
         ]
         grid.add_row(
             *([] if compact else quiz),
             Text(f"{viz.percent(p):>8}"),
             Text.assemble(
-                (f"{loss:5.2f} ", "bold"),
-                viz.bar(loss / top, bar_width, color, track=False),
+                (f"{loss:5.2f} ", "bold"), viz.bar(loss / top, bar_width, color, track=False)
             ),
         )
     return grid

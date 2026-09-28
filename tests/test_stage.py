@@ -13,7 +13,7 @@ class FakeKeys:
         self.keys = list(keys)
         self.waits: list[float | None] = []
 
-    def read(self, timeout: float | None = None) -> str | None:
+    def read(self, timeout: float | None = None, typing: bool = False) -> str | None:
         self.waits.append(timeout)
         return self.keys.pop(0) if self.keys else None
 

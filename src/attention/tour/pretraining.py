@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
+import numpy as np
 from rich.console import RenderableType
 from rich.table import Table
 from rich.text import Text
@@ -14,23 +15,32 @@ from ..dashboard import Watch
 from .lab import Lab
 from .stage import Stage
 
-SECONDS = 56
-FPS = 7.5  # half the dashboard's usual pace, to follow it step by step
+SECONDS = 60  # the pace to aim for; the arithmetic itself usually takes longer
+FPS = 8
 
 
 def run(stage: Stage, lab: Lab) -> None:
     tr, c = lab.trainer, lab.corpus
+    context = lab.model.config.context
+    tokens = tr.steps * tr.batch_size * context
     stage.say(
-        f"Now do that {tr.steps} times. Each step: grab {tr.batch_size} random {c.plural}, run "
-        "them forward, measure the loss, backpropagate, and nudge every weight downhill. That's "
-        "[b]pretraining[/b]: the same first stage every large language model goes through."
+        f"Now do that {tr.steps:,} times. Each step: grab {tr.batch_size} random stretches of "
+        f"{context} tokens from the {c.plural}, run them forward, measure the loss, "
+        "backpropagate, and nudge every weight downhill. That's [b]pretraining[/b]: the same "
+        "first stage every large language model goes through. Your model will read "
+        f"{tokens / 1e6:.1f} million tokens, going over its text about "
+        f"{tokens / len(lab.data.train):.0f} times."
     )
     stage.say(
         f"A tenth of the {c.plural} are held back, and the model never trains on them. The "
         "amber line is its loss on those, to check it's learning patterns rather than "
-        "memorizing. The dashed lines are what you'd score with no neural network at all, "
-        "just by counting letters, or counting which letter follows which. Here's your "
-        "model before its first step:"
+        "memorizing. The dashed lines are what you'd score with no neural network at all, just "
+        "by counting how often each token turns up, or which token follows which. On the "
+        "right, each layer's best guess at what comes after a probe: watch the layers "
+        "learn to work together. (Before any layer has run, the guess is just the last "
+        "token itself: the same table reads tokens in and scores them out, and each "
+        "token's row points most toward itself. The layers have to move it on.) Here's "
+        "your model before its first step:"
     )
 
     watch = Watch(tr, lab.baselines, c, lab.seed, lab.rng)
@@ -40,7 +50,7 @@ def run(stage: Stage, lab: Lab) -> None:
         if lab.trainer.step_number:  # a replay: a new model, from new random numbers
             lab.reseed()
             watch = Watch(lab.trainer, lab.baselines, c, lab.seed, lab.rng)
-        return dashboard.frames(watch, stage.width, SECONDS, FPS)
+        return dashboard.frames(watch, stage.width, SECONDS / stage.speed, FPS)
 
     stage.play(training, start="start training", then="see how it did", again="train a new one")
     lab.seconds = watch.compute
@@ -48,7 +58,7 @@ def run(stage: Stage, lab: Lab) -> None:
     stage.show(summary(lab, path))
     stage.say(
         "You just pretrained a language model. The big ones do exactly this, on trillions of "
-        "tokens instead of a few thousand, for months, on thousands of GPUs."
+        "tokens instead of a few million, for months, on thousands of GPUs."
     )
 
 
@@ -56,15 +66,15 @@ def summary(lab: Lab, path: Path) -> Table:
     tr, b = lab.trainer, lab.baselines
     first_val = tr.val_losses[0][1]
     last_val = tr.val_losses[-1][1]
+    tokens = tr.step_number * tr.batch_size * lab.model.config.context
     grid = Table.grid(padding=(0, 2))
     grid.add_column(no_wrap=True)
-    grid.add_column()
-    words = tr.step_number * tr.batch_size
+    grid.add_column(overflow="fold")  # a long path breaks onto the next line, not off the edge
     grid.add_row(
         Text("✓", style=f"bold {viz.GREEN}"),
         Text.assemble(
-            (f"{tr.step_number} steps", "bold"), (f" · {words:,} {lab.corpus.plural} read · ", viz.FAINT),
-            (f"{lab.seconds:.1f} seconds", "bold"), (" of actual arithmetic", viz.FAINT),
+            (f"{tr.step_number:,} steps", "bold"), (f" · {tokens / 1e6:.1f}M tokens read · ", viz.FAINT),
+            (f"{lab.seconds:.0f} seconds", "bold"), (" of arithmetic", viz.FAINT),
         ),
     )  # fmt: skip
     grid.add_row(
@@ -72,13 +82,15 @@ def summary(lab: Lab, path: Path) -> Table:
         Text.assemble(
             ("held-back loss ", viz.FAINT), (f"{first_val:.2f}", "bold"), (" → ", viz.FAINT),
             (f"{last_val:.2f}", f"bold {viz.GREEN}"),
-            (f"   (counting letter pairs: {b.pairs:.2f})", viz.FAINT),
+            (f"   perplexity {np.exp(first_val):,.0f} → {np.exp(last_val):,.0f}", viz.FAINT),
+            (f"   (counting token pairs: {b.pairs:.2f})", viz.FAINT),
         ),
     )  # fmt: skip
     grid.add_row(
         Text("◆", style=f"bold {viz.PURPLE}"),
-        Text.assemble(("It named itself ", viz.FAINT), (lab.name, f"bold {viz.PURPLE}")),
-    )
+        Text.assemble(("It named itself ", viz.FAINT), (lab.name, f"bold {viz.PURPLE}"),
+                      (", a name it made up", viz.FAINT)),
+    )  # fmt: skip
     grid.add_row(
         Text("↓", style=f"bold {viz.ACCENT}"),
         Text.assemble(("Saved to ", viz.FAINT), (tidy(path), "bold")),

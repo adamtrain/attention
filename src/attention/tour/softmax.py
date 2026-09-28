@@ -11,12 +11,11 @@ from rich.text import Text
 
 from .. import viz
 from ..model import softmax
-from ..views import token_chip
+from ..views import chip
 from .code import excerpt
 from .lab import Lab
 from .stage import Frame, Stage, hold
 
-LETTERS = "aeoiu"
 SCORES = np.array([2.0, 1.0, 0.2, -0.5, -1.5])
 
 
@@ -31,9 +30,9 @@ def run(stage: Stage, lab: Lab) -> None:
         "everything positive, and stretches the big ones much further apart.\n"
         "[accent]2.[/] Divide each result by the total, so they add up to 100%.",
     )
-    stage.say("Say the model scored five letters like this:", gap=False)
+    stage.say("Say the model scored five possible next tokens like this:", gap=False)
     stage.console.print()
-    stage.play(lambda: steps(lab), fps=1, start="work it out")
+    stage.play(lambda: steps(lab, stage.width), fps=1, start="work it out")
 
     stage.say(
         "One more knob. Dividing the scores by a [b]temperature[/b] before softmax changes how "
@@ -41,7 +40,7 @@ def run(stage: Stage, lab: Lab) -> None:
         "scores of 2 and 1 become 4 and 2. Since e to the power of something turns gaps into "
         "ratios, the favorite pulls even further ahead. Above 1 squeezes them together: at 2, "
         "they become 1 and 0.5, and the long shots catch up. Turn it all the way up and every "
-        "letter gets an even share; all the way down and the top score takes everything. "
+        "token gets an even share; all the way down and the top score takes everything. "
         "Watch:"
     )
     stage.play(lambda: temperatures(lab), fps=20, start="turn the dial")
@@ -53,15 +52,20 @@ def run(stage: Stage, lab: Lab) -> None:
 
 
 def ids(lab: Lab) -> list[int]:
-    return [
-        lab.vocab.chars.index(ch) if ch in lab.vocab.chars else i + 1
-        for i, ch in enumerate(LETTERS)
-    ]
+    """Five of the commonest whole words in the text, to score."""
+    tok = lab.tokenizer
+    counts = np.bincount(lab.data.train, minlength=len(tok))
+    words = [
+        int(i) for i in np.argsort(-counts)
+        if tok.pieces[i].startswith(" ") and tok.pieces[i][1:].isalpha() and len(tok.pieces[i]) > 3
+    ]  # fmt: skip
+    return words[:5]
 
 
-def table(lab: Lab, shown: int) -> Table:
+def table(lab: Lab, shown: int, width: int) -> Table:
     exp = np.exp(SCORES)
     probs = exp / exp.sum()
+    bar = max(8, min(20, width - 59))  # what's left beside the other columns
     grid = Table.grid(padding=(0, 2))
     for _ in range(4):
         grid.add_column(no_wrap=True)
@@ -69,7 +73,7 @@ def table(lab: Lab, shown: int) -> Table:
     grid.add_row(*(Text(h, style=viz.FAINT) for h in heads[: shown + 1]))
     for i, token in enumerate(ids(lab)):
         cols = [
-            token_chip(lab.vocab, token),
+            chip(lab.tokenizer, token, 9),
             Text.assemble(
                 (f"{SCORES[i]:>5.1f} ", "bold"),
                 viz.signed_bar(SCORES[i], 2.0, 6, viz.BLUE, viz.AMBER),
@@ -78,7 +82,7 @@ def table(lab: Lab, shown: int) -> Table:
                 (f"{exp[i]:>5.2f} ", "bold"),
                 viz.bar(exp[i] / exp.max(), 14, viz.PURPLE),
             ),
-            Text.assemble((f"{probs[i]:>4.0%} ", "bold"), viz.bar(probs[i], 20, viz.ACCENT)),
+            Text.assemble((f"{probs[i]:>4.0%} ", "bold"), viz.bar(probs[i], bar, viz.ACCENT)),
         ]
         grid.add_row(*cols[: shown + 1])
     if shown >= 2:
@@ -92,10 +96,10 @@ def table(lab: Lab, shown: int) -> Table:
     return grid
 
 
-def steps(lab: Lab) -> Iterator[Frame]:
-    yield hold(table(lab, 1), 1.2)
-    yield hold(table(lab, 2), 1.6)
-    yield hold(table(lab, 3), 0.1)
+def steps(lab: Lab, width: int) -> Iterator[Frame]:
+    yield hold(table(lab, 1, width), 1.2)
+    yield hold(table(lab, 2, width), 1.6)
+    yield hold(table(lab, 3, width), 0.1)
 
 
 def temperatures(lab: Lab) -> Iterator[Frame]:
@@ -127,7 +131,7 @@ def warmth(lab: Lab, t: float) -> Group:
         grid.add_column(no_wrap=True)
     for i, token in enumerate(ids(lab)):
         grid.add_row(
-            token_chip(lab.vocab, token),
+            chip(lab.tokenizer, token, 9),
             viz.bar(float(probs[i]), 40, viz.ACCENT),
             Text(f"{probs[i]:>4.0%}"),
         )

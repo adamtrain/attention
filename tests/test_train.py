@@ -1,41 +1,63 @@
 import numpy as np
+import pytest
 
-from attention.corpus import built_in
-from attention.train import Adam, baselines, evaluate, prepare, smooth
+from attention.corpus import Dataset, built_in
+from attention.train import (
+    CONTEXT,
+    STEPS,
+    Adam,
+    baselines,
+    clip,
+    evaluate,
+    prepare,
+    smooth,
+    steps_for,
+)
+
+from .conftest import small_trainer
 
 
-def test_training_beats_counting_letter_pairs():
-    trainer = prepare(built_in("dinosaurs"), seed=3)
-    b = baselines(trainer.data)
-    start = evaluate(trainer.model, trainer.data, trainer.data.val)
-    assert abs(start - b.uniform) < 0.1  # untrained: every token about equally likely
-    while not trainer.done:
-        trainer.step()
-    held_back = evaluate(trainer.model, trainer.data, trainer.data.val)
-    assert held_back < b.pairs
-    assert b.uniform > b.letters > b.pairs
+def test_training_beats_counting_tokens(trained):
+    b = baselines(trained.data)
+    assert b.uniform > b.tokens > b.pairs
+    first = trained.val_losses[0][1] if len(trained.val_losses) > 1 else b.uniform
+    assert trained.val_losses[-1][1] < b.tokens
+    assert trained.val_losses[-1][1] <= first
+    assert smooth(trained.losses, 0.1)[-1] < smooth(trained.losses, 0.1)[20]
+
+
+def test_an_untrained_model_is_about_as_good_as_guessing():
+    trainer = small_trainer(steps=1)
+    assert abs(evaluate(trainer.model, *trainer.held) - baselines(trainer.data).uniform) < 0.2
 
 
 def test_the_same_seed_makes_the_same_model():
     runs = []
     for _ in range(2):
-        trainer = prepare(built_in("names"), seed=42, steps=30)
+        trainer = small_trainer("shakespeare", seed=42, steps=10)
         while not trainer.done:
             trainer.step()
-        runs.append(trainer.model.params["mlp.up"])
+        runs.append(trainer.model.params["layers.1.mlp.up"])
     np.testing.assert_array_equal(runs[0], runs[1])
 
 
-def test_steps_report_what_moved():
-    trainer = prepare(built_in("towns"), seed=1, steps=5)
-    before = trainer.model.params["embed.token"].copy()
+def test_steps_report_what_moved_and_how_big_the_gradient_was():
+    trainer = small_trainer("fairytales", steps=5)
+    before = trainer.model.params["embed"].copy()
     step = trainer.step()
-    np.testing.assert_allclose(
-        trainer.model.params["embed.token"], before + step.moved["embed.token"]
-    )
-    norms = step.layer_norms()
-    assert set(norms) == {"embeddings", "attention", "mlp", "head"}
-    assert all(n > 0 for n in norms.values())
+    np.testing.assert_allclose(trainer.model.params["embed"], before + step.moved["embed"])
+    sizes = step.group_sizes(trainer.model.config)
+    assert list(sizes) == ["embeddings", "layer 1", "layer 2", "final norm"]
+    assert all(n > 0 for n in sizes.values())
+    assert step.size == pytest.approx(np.sqrt(sum(s * s for s in sizes.values())))
+
+
+def test_clipping_shortens_a_long_gradient_without_turning_it():
+    grads = {"a": np.array([3.0, 0.0]), "b": np.array([4.0])}
+    clipped, size = clip(grads, 1.0)
+    assert size == pytest.approx(5.0)
+    np.testing.assert_allclose(clipped["a"], [0.6, 0.0])
+    assert clip(grads, 10.0)[0] is grads
 
 
 def test_adam_moves_against_the_gradient():
@@ -46,23 +68,30 @@ def test_adam_moves_against_the_gradient():
 
 
 def test_weight_decay_shrinks_weights_but_not_the_norms():
-    params = {"mlp.up": np.ones((2, 2)), "mlp.norm": np.ones(2)}
+    params = {"layers.0.mlp.up": np.ones((2, 2)), "layers.0.mlp.norm": np.ones(2)}
     adam = Adam(params, decay=2.0)
     adam.step(params, {k: np.zeros_like(v) for k, v in params.items()}, lr=0.01)
-    assert np.allclose(params["mlp.up"], 0.98)  # no gradient at all, and it still shrank
-    assert np.allclose(params["mlp.norm"], 1.0)
+    assert np.allclose(params["layers.0.mlp.up"], 0.98)  # no gradient at all, and it still shrank
+    assert np.allclose(params["layers.0.mlp.norm"], 1.0)
 
 
-def test_learning_rate_warms_up_then_decays():
-    trainer = prepare(built_in("names"), seed=0, steps=100)
-    first = trainer.learning_rate()
-    trainer.step_number = 20
-    peak = trainer.learning_rate()
-    trainer.step_number = 99
-    assert first < peak and trainer.learning_rate() < peak
+def test_learning_rate_warms_up_then_eases_down():
+    trainer = small_trainer(steps=1000)
+    rates = []
+    for n in (0, 50, 100, 550, 999):
+        trainer.step_number = n
+        rates.append(trainer.learning_rate())
+    assert rates[0] < rates[1] < rates[2]
+    assert rates[2] > rates[3] > rates[4] == pytest.approx(trainer.lr * 0.1, rel=0.01)
+
+
+def test_more_text_means_more_steps():
+    small = Dataset.split(built_in("fables"), np.random.default_rng([1, 0]))  # as seed 1 splits it
+    big = Dataset.split(built_in("fairytales"), np.random.default_rng([1, 0]))
+    assert STEPS[0] <= steps_for(small) < steps_for(big) <= STEPS[1]
+    assert prepare(built_in("fables"), 1).steps == steps_for(small, context=CONTEXT)
 
 
 def test_smoothing_follows_the_trend():
     assert smooth([]) == []
-    out = smooth([4.0, 0.0, 0.0, 0.0], alpha=0.5)
-    assert out == [4.0, 2.0, 1.0, 0.5]
+    assert smooth([4.0, 0.0, 0.0, 0.0], alpha=0.5) == [4.0, 2.0, 1.0, 0.5]

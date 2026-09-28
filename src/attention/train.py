@@ -1,20 +1,26 @@
-"""Pretraining: show the model words, measure its surprise, and nudge every weight downhill."""
+"""Pretraining: show the model text, measure its surprise, and nudge every weight downhill."""
 
 from __future__ import annotations
 
-from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from itertools import pairwise
 
 import numpy as np
 
-from .corpus import Corpus, Dataset
-from .model import LAYERS, PARTS, Array, Config, Transformer, cross_entropy
+from .corpus import VOCAB, Corpus, Dataset
+from .model import Array, Config, Transformer, cross_entropy, groups, part
 
-STEPS = 400
-BATCH = 32
+PASSES = 16  # how many times, on average, pretraining reads each token of its text
+STEPS = (600, 3000)  # the fewest and most steps it will take
+BATCH = 16  # stretches of text per step
+CONTEXT = 128  # tokens per stretch, and the most the model can read at once
 LEARNING_RATE = 0.01
-WEIGHT_DECAY = 2.0  # strong, because the model has more weights than it has letters to learn
+WARMUP = 100  # steps to ramp the learning rate up from almost nothing
+WEIGHT_DECAY = 0.1
+CLIP = 1.0  # the largest a step's whole gradient may be, measured as one long vector
+EVAL = 48  # held-back stretches to measure progress on
+
+type Batches = Callable[[np.random.Generator], tuple[Array, Array]]
 
 
 class Adam:
@@ -32,7 +38,7 @@ class Adam:
     def __init__(
         self,
         params: dict[str, Array],
-        betas: tuple[float, float] = (0.9, 0.99),
+        betas: tuple[float, float] = (0.9, 0.95),
         decay: float = 0.0,
     ):
         self.b1, self.b2 = betas
@@ -54,10 +60,27 @@ class Adam:
             m = self.m[name] / (1 - self.b1**self.t)
             v = self.v[name] / (1 - self.b2**self.t)
             moved[name] = -lr * m / (np.sqrt(v) + 1e-8)
-            if self.decay and not name.endswith(".norm"):
+            if self.decay and not name.endswith("norm"):
                 moved[name] -= lr * self.decay * w
             w += moved[name]
         return moved
+
+
+def gradient_size(grads: dict[str, Array]) -> float:
+    """Every gradient as one long vector: how long is it?"""
+    return float(np.sqrt(sum(float((g * g).sum()) for g in grads.values())))
+
+
+def clip(grads: dict[str, Array], most: float) -> tuple[dict[str, Array], float]:
+    """Shrink the whole gradient if it's longer than `most`, keeping its direction.
+
+    Now and then one batch produces a huge gradient, and one huge step can undo hours of
+    training. Clipping caps the step's size without changing which way it goes.
+    """
+    size = gradient_size(grads)
+    if size <= most:
+        return grads, size
+    return {k: g * (most / size) for k, g in grads.items()}, size
 
 
 @dataclass(slots=True)
@@ -67,15 +90,26 @@ class Step:
     number: int
     loss: float
     lr: float
+    size: float  # how long the gradient was, before clipping
     grads: dict[str, Array]
     moved: dict[str, Array]
 
-    def layer_norms(self) -> dict[str, float]:
-        """How big the gradient was for each layer: how hard backprop pushed on it."""
-        totals = dict.fromkeys(LAYERS, 0.0)
+    def group_sizes(self, config: Config) -> dict[str, float]:
+        """How big the gradient was for each part of the model: how hard backprop pushed on it."""
+        totals = dict.fromkeys(groups(config), 0.0)
         for name, g in self.grads.items():
-            totals[PARTS[name].layer] += float((g * g).sum())
-        return {layer: total**0.5 for layer, total in totals.items()}
+            totals[part(name).group] += float((g * g).sum())
+        return {group: total**0.5 for group, total in totals.items()}
+
+
+def steps_for(data: Dataset, batch: int = BATCH, context: int = CONTEXT) -> int:
+    """Enough steps to read the training text about PASSES times, to the nearest hundred.
+
+    More text means more steps. Fewer, and the model would still be learning when it stopped;
+    many more, and it would start memorizing the text instead of learning from it.
+    """
+    steps = round(PASSES * len(data.train) / (batch * context), -2)
+    return int(min(max(steps, STEPS[0]), STEPS[1]))
 
 
 @dataclass(slots=True)
@@ -83,63 +117,88 @@ class Trainer:
     model: Transformer
     data: Dataset
     rng: np.random.Generator
-    steps: int = STEPS
+    steps: int = STEPS[1]
     batch_size: int = BATCH
     lr: float = LEARNING_RATE
     decay: float = WEIGHT_DECAY
+    warmup: int = WARMUP
+    most: float = CLIP
+    batches: Batches | None = None  # where each step's examples come from (default: the text)
     step_number: int = 0
     losses: list[float] = field(default_factory=list)
     val_losses: list[tuple[int, float]] = field(default_factory=list)
+    sizes: list[float] = field(default_factory=list)  # each step's gradient size
     optimizer: Adam = field(init=False)
+    held: tuple[Array, Array] = field(init=False)
 
     def __post_init__(self) -> None:
         self.optimizer = Adam(self.model.params, decay=self.decay)
+        self.held = self.data.fixed(EVAL, self.model.config.context)
 
     @property
     def done(self) -> bool:
         return self.step_number >= self.steps
 
     def learning_rate(self) -> float:
-        """Big steps at first, smaller ones as the model settles in."""
-        warmup = 20
-        if self.step_number < warmup:
-            return self.lr * (self.step_number + 1) / warmup
-        return self.lr * (1 - 0.9 * self.step_number / self.steps)
+        """Ramp up gently, then ease down along a cosine curve to a tenth of the peak."""
+        if self.step_number < self.warmup:
+            return self.lr * (self.step_number + 1) / self.warmup
+        progress = (self.step_number - self.warmup) / max(1, self.steps - self.warmup)
+        return self.lr * (0.1 + 0.9 * 0.5 * (1 + np.cos(np.pi * min(progress, 1.0))))
+
+    def batch(self) -> tuple[Array, Array]:
+        if self.batches is not None:
+            return self.batches(self.rng)
+        return self.data.windows(self.rng, self.batch_size, self.model.config.context)
 
     def step(self) -> Step:
-        picks = self.rng.choice(len(self.data.train), size=self.batch_size, replace=False)
-        inputs, targets = self.data.batch([self.data.train[i] for i in picks])
+        inputs, targets = self.batch()
         trace = self.model.forward(inputs)
         loss, dlogits = cross_entropy(trace.logits, targets)
         grads, _ = self.model.backward(trace, dlogits)
+        clipped, size = clip(grads, self.most)
         lr = self.learning_rate()
-        moved = self.optimizer.step(self.model.params, grads, lr)
+        moved = self.optimizer.step(self.model.params, clipped, lr)
         self.step_number += 1
         self.losses.append(loss)
-        return Step(self.step_number, loss, lr, grads, moved)
+        self.sizes.append(size)
+        return Step(self.step_number, loss, lr, size, grads, moved)
 
     def evaluate(self) -> float:
-        """Loss on the held-back words, which the model never trains on."""
-        loss = evaluate(self.model, self.data, self.data.val)
+        """Loss on held-back text, which the model never trains on."""
+        loss = evaluate(self.model, *self.held)
         self.val_losses.append((self.step_number, loss))
         return loss
 
 
-def prepare(corpus: Corpus, seed: int, steps: int = STEPS) -> Trainer:
+def prepare(
+    corpus: Corpus,
+    seed: int,
+    steps: int | None = None,
+    config: Config | None = None,
+    vocab: int = VOCAB,
+) -> Trainer:
     """A fresh, untrained model and everything needed to train it.
 
-    The seed decides the held-back words, the starting weights and the order of the batches,
-    so the same seed and corpus always make the same model.
+    The seed decides the held-back documents, the starting weights and the order of the
+    batches, so the same seed and corpus always make the same model.
     """
-    data = Dataset.split(corpus, np.random.default_rng([seed, 0]))
-    config = Config(vocab=len(data.vocab), context=data.context)
+    data = Dataset.split(corpus, np.random.default_rng([seed, 0]), vocab=vocab)
+    config = config or Config(vocab=len(data.tokenizer), context=CONTEXT)
     model = Transformer.create(config, np.random.default_rng([seed, 1]))
+    steps = steps or steps_for(data, context=config.context)
     return Trainer(model, data, np.random.default_rng([seed, 2]), steps=steps)
 
 
-def evaluate(model: Transformer, data: Dataset, words: tuple[str, ...]) -> float:
-    inputs, targets = data.batch(words)
-    return cross_entropy(model.forward(inputs).logits, targets)[0]
+def evaluate(model: Transformer, inputs: Array, targets: Array, batch: int = 16) -> float:
+    """The average loss over some text, a few stretches at a time."""
+    total, count = 0.0, 0
+    for i in range(0, len(inputs), batch):
+        logits = model.forward(inputs[i : i + batch]).logits
+        n = int((targets[i : i + batch] >= 0).sum())
+        total += cross_entropy(logits, targets[i : i + batch])[0] * n
+        count += n
+    return total / max(count, 1)
 
 
 def smooth(values: list[float], alpha: float = 0.05) -> list[float]:
@@ -158,27 +217,18 @@ def smooth(values: list[float], alpha: float = 0.05) -> list[float]:
 class Baselines:
     """The loss you'd get without a neural network at all, for comparison."""
 
-    uniform: float  # every character equally likely
-    letters: float  # knowing how common each character is
-    pairs: float  # knowing which character tends to follow which
+    uniform: float  # every token equally likely
+    tokens: float  # knowing how common each token is
+    pairs: float  # knowing which token tends to follow which
 
 
 def baselines(data: Dataset) -> Baselines:
-    vocab = data.vocab
-    seqs = [vocab.sequence(w) for w in data.train]
-    held = [vocab.sequence(w) for w in data.val]
-    n = len(vocab)
-
-    single = Counter(t for s in seqs for t in s[1:])
-    probs = np.array([single[i] + 1 for i in range(n)], dtype=float)
-    probs /= probs.sum()
-    letters = -np.mean([np.log(probs[t]) for s in held for t in s[1:]])
-
+    n = len(data.tokenizer)
+    train, held = data.train, data.val
+    counts = np.bincount(train[1:], minlength=n) + 1.0
+    single = -np.log(counts[held[1:]] / counts.sum()).mean()
     pairs = np.ones((n, n))
-    for s in seqs:
-        for a, b in pairwise(s):
-            pairs[a, b] += 1
+    np.add.at(pairs, (train[:-1], train[1:]), 1.0)
     pairs /= pairs.sum(axis=1, keepdims=True)
-    pair_loss = -np.mean([np.log(pairs[a, b]) for s in held for a, b in pairwise(s)])
-
-    return Baselines(float(np.log(n)), float(letters), float(pair_loss))
+    pair_loss = -np.log(pairs[held[:-1], held[1:]]).mean()
+    return Baselines(float(np.log(n)), float(single), float(pair_loss))

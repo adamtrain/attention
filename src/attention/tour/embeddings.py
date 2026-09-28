@@ -7,126 +7,102 @@ from rich.table import Table
 from rich.text import Text
 
 from .. import viz
-from ..views import display, token_chip
+from ..views import chip, label
 from .lab import Lab
 from .stage import Stage
 
 
 def run(stage: Stage, lab: Lab) -> None:
-    p, vocab, c = lab.model.params, lab.vocab, lab.model.config
+    p, tok, c = lab.model.params, lab.tokenizer, lab.model.config
     width = c.width
     stage.say(
-        "A token ID is only a name tag. Token 19 isn't bigger than token 5, or more like token "
-        "18 than token 2, so adding or multiplying IDs means nothing. The model needs a "
+        "A token ID is only a name tag. Token 300 isn't bigger than token 5, or more like token "
+        "299 than token 2, so adding or multiplying IDs means nothing. The model needs a "
         "description of each token that it [i]can[/i] do arithmetic on, and where tokens that "
         "behave alike can look alike."
     )
     stage.say(
         f"So each token gets its own list of {width} numbers, called its [b]embedding[/b]. (A "
         "list of numbers like this is a [b]vector[/b]; you'll see that word a lot.) The "
-        "embeddings live in a table with one column per token, and turning a token into its "
-        "vector is just a lookup: find its column, read off the numbers. Here's your model's "
-        "table:"
+        f"embeddings live in a table with one row per token: {len(tok)} rows of {width} "
+        "numbers. Turning a token into its vector is just a lookup: find its row, read off the "
+        "numbers. Here are the rows for the tokens of your example passage:"
     )
-    table = p["embed.token"]
+    inputs, _ = lab.example()
+    ids = [int(t) for t in inputs[0, 1:13]]
+    table = p["embed"]
     scale = viz.scale_of(table)
-    stage.show(embedding_table(lab, table.T, scale))
+    stage.show(rows(lab, ids, scale, stage.width))
     stage.say(
-        f"Each column is one token and each row is one of the {width} numbers. The color "
-        "shows each number's sign and size. Think of the numbers as dials that together "
-        "describe a token. One dial might end up meaning “is this a vowel?”, another “does "
-        "this tend to end a word?”. Tokens that behave alike get similar settings, so "
-        "whatever the model learns about one of them partly carries over to the rest."
+        f"Each row is one token, each column one of its {width} numbers, and the color shows "
+        "each number's sign and size. Think of the numbers as dials that together describe a "
+        "token: one might end up meaning “is this a name?”, another “does this end a "
+        "sentence?”. Tokens that behave alike get similar settings, so whatever the model "
+        "learns about one of them partly carries over to the rest."
     )
     stage.say(
-        "Nobody decides what the dials mean. The table is weights, like every other part of "
-        "the model: it starts out random, as it is here, and training adjusts every number in "
-        "it. In practice the meanings don't line up neatly with one dial each; they end up "
-        "smeared across many of them. Big models use the same trick with far more numbers "
-        "per token: GPT-3 used 12,288."
+        "Nobody decides what the dials mean. The table is weights, like every other part of the "
+        "model: it starts out random, as it is here, and training adjusts every number in it. "
+        "In practice the meanings don't line up neatly with one dial each; they're smeared "
+        f"across many. The table holds {table.size:,} of your model's {lab.model.size:,} "
+        "parameters. GPT-3's holds 617 million: 50,257 tokens with 12,288 numbers each."
     )
     stage.wait()
 
-    word = lab.corpus.example
-    ids = vocab.sequence(word)[:-1]
-    pos = min(3, len(ids) - 1)
-    ch = vocab.chars[ids[pos]]
     stage.say(
-        f"One problem: an `{ch}` at the start of a word and an `{ch}` at the end would get "
-        "identical vectors, but order matters (“tops” and “stop” use the same letters). So "
-        f"there's a second table, with a vector for each of the {c.context} places a letter "
-        "can sit in a word, and it's learned too. The model adds the token's "
-        "vector and the position's vector, number by number, so the result says both "
-        "[i]which[/i] letter this is and [i]where[/i] it is:"
+        "What about order? “The Fox ate the Hen” and “The Hen ate the Fox” have the same "
+        "tokens. Older models like GPT-2 and GPT-3 had a second table with a vector for every "
+        "position, added to each token's vector. Today's models don't: position is brought in "
+        "later, inside attention, by rotating vectors. That's two chapters from now. For now, "
+        "each token is just its row of the table."
     )
-    tok, where = table[ids[pos]], p["embed.position"][pos]
-    stage.show(sum_rows(lab, ids[pos], pos, tok, where, scale))
-    stage.wait()
-
+    tr = lab.model.forward(inputs)
+    t = inputs.shape[1]
     stage.say(
-        f"Do that at every position and {display(word)} becomes a grid of numbers: one row "
-        f"per token, {width} numbers per row. That grid is what flows into the rest of the "
-        "model. Everything from here on is arithmetic on grids like this one, and each step "
-        f"hands the next one a grid of the same shape, still {width} numbers per position."
+        f"Stack the rows up and your example becomes a grid of numbers: {t} tokens, {width} "
+        "numbers each. This grid is the start of what's called the [b]residual stream[/b]. "
+        "Every layer of the model will read it and add its own numbers to it, and at the end "
+        "it's turned back into a guess about the next token, using the very same table again, "
+        "read the other way. The grid keeps its shape the whole way through: "
+        f"{t} × {width}."
     )
-    tr = lab.model.forward(np.array([ids]))
-    stage.show(input_grid(lab, ids, tr.x0[0], scale))
+    stage.show(stream_shape(lab, tr.blocks[0].x[0], ids, scale, stage.width))
 
 
-def embedding_table(lab: Lab, matrix: np.ndarray, scale: float) -> Table:
-    vocab = lab.vocab
+def rows(lab: Lab, ids: list[int], scale: float, width: int) -> Table:
+    tok = lab.tokenizer
+    tiles = max(len(label(tok, t)) + 2 for t in ids)
+    numbers = tiles + 1 + len(str(max(ids))) + 1 + lab.model.config.width <= width  # ids fit?
     grid = Table.grid(padding=(0, 1))
-    grid.add_column(justify="right", no_wrap=True)
+    grid.add_column(no_wrap=True, justify="right")
+    grid.add_column(no_wrap=True, justify="right")
     grid.add_column(no_wrap=True)
-    lines = viz.signed_blocks(matrix, scale, width=2)
-    for i, line in enumerate(lines):
-        dims = f"{i * 2 + 1}–{i * 2 + 2}" if i in (0, len(lines) - 1) else ""
-        grid.add_row(Text(dims, style=viz.FAINT), line)
-    letters = Text(no_wrap=True)
-    for ch in vocab.chars:
-        letters.append(f"{ch:<2}", style="bold")
-    grid.add_row(Text("token", style=viz.FAINT), letters)
-    grid.add_row("", Text(""))
-    grid.add_row("", viz.legend(viz.SIGNED, "negative", "positive"))
-    return grid
-
-
-def sum_rows(lab: Lab, token: int, pos: int, tok, where, scale: float) -> Table:
-    grid = Table.grid(padding=(0, 1))
-    grid.add_column(justify="right", no_wrap=True)
-    grid.add_column(no_wrap=True)
-    grid.add_column(no_wrap=True)
-    grid.add_row(
-        Text(" "),
-        Text.assemble("token ", token_chip(lab.vocab, token)),
-        viz.signed_cells(tok, scale),
-    )
-    grid.add_row(Text("+", style="bold"), Text(f"position {pos}"), viz.signed_cells(where, scale))
-    grid.add_row(
-        Text("=", style="bold"),
-        Text("input", style="bold"),
-        viz.signed_cells(tok + where, scale),
-    )
-    return grid
-
-
-def input_grid(lab: Lab, ids: list[int], x0: np.ndarray, scale: float) -> Table:
-    p = lab.model.params
-    grid = Table.grid(padding=(0, 1))
-    for _ in range(7):
-        grid.add_column(no_wrap=True)
-    grid.add_row(
-        "", Text("token", style=viz.FAINT), "", Text("position", style=viz.FAINT), "",
-        Text("input to the model", style=viz.FAINT), "",
-    )  # fmt: skip
-    for t, token in enumerate(ids):
+    seen = []
+    for token in ids:
+        if token in seen:
+            continue
+        seen.append(token)
         grid.add_row(
-            token_chip(lab.vocab, token),
-            viz.signed_cells(p["embed.token"][token], scale, 1),
-            Text("+", style=viz.FAINT),
-            viz.signed_cells(p["embed.position"][t], scale, 1),
-            Text("=", style=viz.FAINT),
-            viz.signed_cells(x0[t], scale, 2),
-            Text(f"{t}", style=viz.FAINT),
+            chip(tok, token),
+            Text(str(token) if numbers else "", style=viz.FAINT),
+            viz.signed_cells(lab.model.params["embed"][token], scale, 1),
         )
+    grid.add_row("", "", "")
+    grid.add_row("", "", viz.legend(viz.SIGNED, "negative", "positive"))
+    return grid
+
+
+def stream_shape(lab: Lab, x: np.ndarray, ids: list[int], scale: float, width: int) -> Table:
+    tok = lab.tokenizer
+    tiles = max(len(label(tok, t)) + 2 for t in ids[:8])
+    numbers = tiles + 1 + x.shape[1] + 2 <= width  # room for the row numbers?
+    grid = Table.grid(padding=(0, 1))
+    grid.add_column(no_wrap=True, justify="right")
+    grid.add_column(no_wrap=True)
+    grid.add_column(no_wrap=True, style=viz.FAINT)
+    for i, token in enumerate(ids[:8]):
+        grid.add_row(
+            chip(tok, token), viz.signed_cells(x[i + 1], scale, 1), f"{i + 1}" if numbers else ""
+        )
+    grid.add_row(Text("…", style=viz.FAINT), Text(f"{len(x)} rows in all", style=viz.FAINT), "")
     return grid

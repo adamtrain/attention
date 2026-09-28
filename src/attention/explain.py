@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
 
-from .corpus import BOUNDARY, Vocab
 from .model import Array, Trace, Transformer, softmax
+from .tokenizer import END
 
 
 @dataclass(frozen=True, slots=True)
 class Influence:
-    prefix: str
+    ids: tuple[int, ...]  # what the model read, <|endoftext|> first
     trace: Trace
     probs: Array  # what comes next
-    sizes: Array  # how strongly each input position could sway the top prediction
+    sizes: Array  # how strongly each token read could sway the top prediction
 
     @property
     def top(self) -> int:
@@ -23,8 +24,8 @@ class Influence:
 
     @property
     def runner_up(self) -> int:
-        """The likeliest letter after the top one (not the end of the word)."""
-        order = [int(i) for i in np.argsort(-self.probs) if int(i) not in (self.top, 0)]
+        """The likeliest token after the top one (not the end of the document)."""
+        order = [int(i) for i in np.argsort(-self.probs) if int(i) not in (self.top, END)]
         return order[0]
 
 
@@ -36,16 +37,13 @@ def surprise_gradient(trace: Trace, probs: Array, target: int) -> Array:
     return dlogits
 
 
-def influence(
-    model: Transformer, vocab: Vocab, prefix: str, target: int | None = None
-) -> Influence:
-    """Backpropagate from one prediction to the input vectors, leaving the weights alone."""
-    ids = np.array([vocab.encode(BOUNDARY + prefix)])
-    trace = model.forward(ids)
+def influence(model: Transformer, ids: Sequence[int], target: int | None = None) -> Influence:
+    """Backpropagate from one prediction to the tokens that went in, leaving the weights alone."""
+    trace = model.forward(np.array([ids]))
     probs = softmax(trace.logits[0, -1])
     target = int(np.argmax(probs)) if target is None else target
-    _, dx0 = model.backward(trace, surprise_gradient(trace, probs, target))
-    return Influence(prefix, trace, probs, np.linalg.norm(dx0[0], axis=-1))
+    _, dx = model.backward(trace, surprise_gradient(trace, probs, target))
+    return Influence(tuple(ids), trace, probs, np.linalg.norm(dx[0], axis=-1))
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,13 +54,13 @@ class Nudge:
     after: Array
 
 
-def nudge(model: Transformer, vocab: Vocab, prefix: str, target: int) -> Nudge:
+def nudge(model: Transformer, ids: Sequence[int], target: int) -> Nudge:
     """One step of plain gradient descent toward `target`, on a copy of the model.
 
     Uses the smallest learning rate from a short ladder that makes the change easy to see.
     """
-    ids = np.array([vocab.encode(BOUNDARY + prefix)])
-    trace = model.forward(ids)
+    batch = np.array([ids])
+    trace = model.forward(batch)
     before = softmax(trace.logits[0, -1])
     after, lr = before, 0.0
     for lr in (0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 4.0):
@@ -70,7 +68,7 @@ def nudge(model: Transformer, vocab: Vocab, prefix: str, target: int) -> Nudge:
         grads, _ = copy.backward(trace, surprise_gradient(trace, before, target))
         for name, w in copy.params.items():
             w -= lr * grads[name]
-        after = softmax(copy.forward(ids).logits[0, -1])
+        after = softmax(copy.forward(batch).logits[0, -1])
         if after[target] >= 0.2:
             break
     return Nudge(target, lr, before, after)

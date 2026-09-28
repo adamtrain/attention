@@ -3,7 +3,8 @@
     uv run scripts/screenshots.py
 
 Every picture is drawn by the same code the tour and the commands use, from real models trained
-with fixed seeds, then saved with Rich's SVG export. Nothing touches your own saved model.
+with fixed seeds, then saved with Rich's SVG export. Nothing touches your own saved model. It
+takes several minutes: the models are trained for real.
 """
 
 from __future__ import annotations
@@ -19,22 +20,24 @@ from rich.terminal_theme import TerminalTheme
 from rich.text import Text
 
 from attention import tour, viz
-from attention.cli import show_explain, show_words
+from attention.cli import show_explain
 from attention.corpus import built_in
 from attention.dashboard import Watch
-from attention.finetune import niche_trainer, share
-from attention.generate import invent, picks
+from attention.finetune import AdapterTrainer, LoRA, narrow, niche_trainer, share
+from attention.generate import picks, prompt, samples
+from attention.induction import Race, habits, sequences
 from attention.store import load
 from attention.tour import attention as attention_chapter
-from attention.tour import backprop, descent, finetuning, memorizing
+from attention.tour import cache, finetuning, layers, learned, memorizing
 from attention.tour.lab import Lab
 from attention.tour.stage import THEME as STYLES
 from attention.tour.stage import Stage
-from attention.views import step_view
+from attention.train import evaluate
+from attention.views import running
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
-PROMPT = "\u276f "  # a shell-prompt chevron
+PROMPT = "❯ "  # a shell-prompt chevron
 SEED = 21
 
 THEME = TerminalTheme(
@@ -76,7 +79,7 @@ def terminal(width: int) -> Console:
     )
 
 
-def prompt(console: Console, command: str) -> None:
+def prompt_line(console: Console, command: str) -> None:
     console.print(Text.assemble((PROMPT, f"bold {viz.ACCENT}"), (command, "bold")))
 
 
@@ -93,69 +96,67 @@ def last(frames):
 
 def save(console: Console, name: str, title: str) -> None:
     console.save_svg(str(DOCS / f"{name}.svg"), title=title, theme=THEME)
+    print(f"wrote docs/{name}.svg")
 
 
 def main() -> None:
     DOCS.mkdir(exist_ok=True)
     home = Path(tempfile.mkdtemp())
+    lab = Lab.create(built_in("fables"), SEED, home / "model.npz")
 
-    # The hero: pretraining, part way through.
-    lab = Lab.create(built_in("dinosaurs"), SEED, home / "model.npz")
-    watch = Watch(lab.trainer, lab.baselines, lab.corpus, lab.seed, lab.rng)
-    while lab.trainer.step_number < 180:
-        watch.step()
-    hero = terminal(100)
-    prompt(hero, f"attention train --corpus dinosaurs --seed {SEED}")
-    hero.print()
-    hero.print(Padding(watch.render(96), (0, 0, 0, 2)))
-    save(hero, "hero", "attention train")
-
-    # Attention, from the tour (untrained, as the tour shows it).
-    fresh = Lab.create(built_in("dinosaurs"), SEED, home / "unused.npz")
+    # Attention, from the tour: the lookup with made-up numbers, then the three jobs.
     con = terminal(88)
     stage = Stage(con, animate=False)
     chapter(stage, "Attention")
-    inputs, _ = fresh.example()
-    tr = fresh.model.forward(inputs)
-    chars = [fresh.vocab.chars[int(i)] for i in inputs[0]]
-    raw = (tr.q[0, 0] @ tr.k[0, 0].T) / np.sqrt(fresh.model.config.head_width)
-    stage.show(last(attention_chapter.scoring(raw, tr.weights[0, 0], chars)))
+    stage.show(last(attention_chapter.toy()))
+    stage.show(attention_chapter.jobs())
     save(con, "attention", "attention · tour")
 
-    # Backpropagation: the neuron, then the transformer's output gradient.
+    # The hero: pretraining, part way through.
+    watch = Watch(lab.trainer, lab.baselines, lab.corpus, lab.seed, lab.rng)
+    while lab.trainer.step_number < round(lab.trainer.steps * 0.45, -2):
+        watch.step()
+    hero = terminal(100)
+    prompt_line(hero, f"attention train --corpus fables --seed {SEED}")
+    hero.print()
+    hero.print(Padding(watch.render(96), (0, 0, 0, 2)))
+    save(hero, "hero", "attention train")
+    while not lab.trainer.done:
+        watch.step()
+    lab.finish()
+
+    # Why layers stack: the race, and the circuit it grew.
+    race = Race(layers.WORDS + 1, np.random.default_rng(layers.FIRST))
+    while not race.done:
+        race.step()
+    con = terminal(96)
+    stage = Stage(con, animate=False)
+    chapter(stage, "Why layers stack")
+    stage.show(layers.view(race, stage.width))
+    two = race.learners[1].model
+    found = habits(two, sequences(np.random.default_rng(5), 64, layers.WORDS + 1))
+    shown = sequences(np.random.default_rng(2), 1, layers.WORDS + 1)
+    stage.show(layers.circuit_view(lab, two, shown, layers.words(lab), found, stage.width))
+    save(con, "layers", "attention · tour")
+
+    # What it learned: the logit lens on the example.
+    con = terminal(96)
+    stage = Stage(con, animate=False)
+    chapter(stage, "What it learned")
+    inputs, _ = lab.example()
+    lens = lab.model.lens(lab.model.forward(inputs))[:, 0]
+    stage.show(learned.lens_view(lab, lens, learned.pick_rows(lab, lens, 10), stage.width))
+    save(con, "lens", "attention · tour")
+
+    # The KV cache: filling up, and what it costs at scale.
     con = terminal(88)
     stage = Stage(con, animate=False)
-    chapter(stage, "Backpropagation")
-    stage.show(last(backprop.graph_story()))
-    focus = max(1, round(len(fresh.corpus.example) * 0.65))
-    right = int(fresh.example()[1][0, focus])
-    seen = fresh.vocab.decode(inputs[0, : focus + 1])
-    stage.say(
-        "In the transformer, backprop starts with the probabilities. For the quiz "
-        f"`{seen}` → `{fresh.vocab.chars[right]}`:",
-    )
-    stage.show(backprop.output_gradient(fresh, tr.probs[0, focus], right))
-    save(con, "backprop", "attention · tour")
+    chapter(stage, "The KV cache")
+    stage.show(last(cache.filling(lab, stage.width)))
+    stage.show(cache.memory_table(lab))
+    save(con, "cache", "attention · tour")
 
-    # Gradient descent: the three walkers.
-    con = terminal(100)
-    stage = Stage(con, animate=False)
-    chapter(stage, "Gradient descent")
-    stage.show(last(descent.race(stage.width)))
-    save(con, "descent", "attention · tour")
-
-    # Inference: a word being written, mid-way.
-    lab.train_quietly()
-    rng = np.random.default_rng(5)
-    steps = list(picks(lab.model, lab.vocab, rng, 0.8))
-    con = terminal(88)
-    stage = Stage(con, animate=False)
-    chapter(stage, "Inference")
-    mid = steps[min(5, len(steps) - 1)]
-    stage.show(step_view(lab.vocab, mid, stage.width, mid.roll))
-    save(con, "inference", "attention · tour")
-
-    # Memorizing: the oversized model, trained too long.
+    # Memorizing: a model with too little to read, reciting.
     big = memorizing.Run.start(lab)
     while not big.trainer.done:
         big.step()
@@ -165,36 +166,51 @@ def main() -> None:
     stage.show(memorizing.view(lab, big, lab.trainer.val_losses[-1][1], stage.width))
     save(con, "memorizing", "attention · tour")
 
-    # Fine-tuning: a copy of the model, specialized on horned dinosaurs.
+    # Fine-tuning: all of it, and with LoRA.
     niche = lab.corpus.niche
-    rng = np.random.default_rng(11)
-    before = invent(lab.model, lab.vocab, rng, 40, 0.8)
-    tuner = niche_trainer(lab.model, lab.data, niche, lab.dice(6))
+    full = niche_trainer(lab.model, lab.data, niche, np.random.default_rng([SEED, 6]))
+    while not full.done:
+        full.step()
+    lora = LoRA.create(lab.model, np.random.default_rng([SEED, 16]))
+    data = narrow(lab.data, niche)
+    context = lab.model.config.context
+    tuner = AdapterTrainer(
+        lora, lambda r: data.windows(r, 16, context), np.random.default_rng([SEED, 17]),
+        steps=full.steps, lr=finetuning.LORA_RATE,
+    )  # fmt: skip
     while not tuner.done:
         tuner.step()
-    after = invent(tuner.model, lab.vocab, rng, 40, 0.8)
+    merged = lora.merged()
+    rng = np.random.default_rng(11)
+
+    def measure(model) -> float:
+        return share(samples(model, lab.tokenizer, rng, 24, temperature=0.8, limit=48), niche)
+
     con = terminal(88)
     stage = Stage(con, animate=False)
     chapter(stage, "Fine-tuning")
     stage.show(
-        finetuning.compare(
-            before, after, share(before, niche), share(after, niche), niche.ending,
-            set(lab.corpus.words),
+        finetuning.comparison(
+            lab, full.model, merged, lora, measure(full.model), measure(merged),
+            evaluate(full.model, *lab.trainer.held), evaluate(merged, *lab.trainer.held),
         )
     )  # fmt: skip
     save(con, "finetuning", "attention · tour")
 
     # The commands, on the trained model.
     saved = load(lab.model_path)
-    con = terminal(84)
-    prompt(con, "attention generate -n 6")
-    show_words(con, saved, invent(saved.model, saved.vocab, np.random.default_rng(3), 6), 0.8)
-    prompt(con, "attention explain stegosa --teach e")
-    show_explain(con, saved, "stegosa", "e")
+    con = terminal(96)
+    prompt_line(con, 'attention generate -n 1 "The Fox and the"')
+    con.print()
+    ids = prompt(saved.tokenizer, "The Fox and the")
+    steps = list(picks(saved.model, ids, np.random.default_rng(3), 0.8, limit=60))
+    written = [*ids, *(p.token for p in steps)]
+    for line in running(saved.tokenizer, written, 88, saved.memory.copied(written), start=len(ids)):
+        con.print(Padding(line, (0, 0, 0, 4)))
+    con.print()
+    prompt_line(con, 'attention explain "The Fox and the"')
+    show_explain(con, saved, ids)
     save(con, "commands", "attention")
-
-    for path in sorted(DOCS.glob("*.svg")):
-        print(f"wrote {path.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":

@@ -10,9 +10,9 @@ from rich.table import Table
 from rich.text import Text
 
 from .. import viz
-from ..model import PARTS, cross_entropy, linear_backward
+from ..model import cross_entropy, linear_backward
 from ..scalar import Value, neuron
-from ..views import token_chip
+from ..views import chip, label
 from .code import excerpt
 from .lab import Lab
 from .stage import Frame, Stage, hold
@@ -72,16 +72,17 @@ def run(stage: Stage, lab: Lab) -> None:
 
     inputs, targets = lab.example()
     tr = lab.model.forward(inputs)
-    focus = max(1, round(len(lab.corpus.example) * 0.65))
-    seen = lab.vocab.decode(inputs[0, : focus + 1])
+    tok = lab.tokenizer
+    focus = min(inputs.shape[1] - 1, 12)
+    seen = tok.decode(inputs[0, max(0, focus - 4) : focus + 1]).replace("\n", "↵")
     right = int(targets[0, focus])
     probs = tr.probs[0, focus]
     stage.say(
         "In the transformer, backprop starts at the very end, with the probabilities. For the "
-        f"quiz `{seen}` → `{lab.vocab.chars[right]}`, the gradient for each token's score is "
+        f"quiz `…{seen}` → `{label(tok, right)}`, the gradient for each token's score is "
         "wonderfully simple: its probability, minus 1 if it's the right answer."
     )
-    stage.show(output_gradient(lab, probs, right))
+    stage.show(output_gradient(lab, probs, right, stage.width))
     stage.say(
         "Negative means [green]push this score up[/green]: that's the right answer. Every "
         "other score gets pushed [red]down[/red], a little, in proportion to how likely the "
@@ -100,18 +101,29 @@ def run(stage: Stage, lab: Lab) -> None:
         "of its input, which it hands back to the layer before. Then that layer does the same."
     )
     stage.say(
-        f"Here it is flowing back from the loss ({loss:.2f}), from the unembedding at the end "
-        "of the model to the embeddings at the start, with the size of the gradient each set "
-        "of weights got:"
+        f"Here it is flowing back from the loss ({loss:.2f}) through all "
+        f"{lab.model.config.layers} layers, from the output at the end of the model to the "
+        "embeddings at the start, with the size of the gradient each set of weights got:"
     )
-    stage.play(lambda: flow(grads, stage.width), fps=8, start="send it back through the layers")
-
+    stage.play(
+        lambda: flow(lab, grads, stage.width), fps=8, start="send it back through the layers"
+    )
     stage.say(
-        "Where did it end up? This is the token embedding table again. Green shows which way "
-        f"each number will move (up), red down. Only the letters in "
-        f"{lab.corpus.example.capitalize()} got a push. A model can only learn from what it sees."
+        "Notice it doesn't fade away on the way down. The residual connections hand each "
+        "layer's gradient straight through to the layer below, as well as through the block: "
+        "a highway for the gradient, and the reason deep stacks can learn at all."
     )
-    stage.show(embedding_push(lab, -grads["embed.token"].T, set(inputs[0].tolist())))
+    stage.wait()
+
+    used = sorted({int(t) for t in inputs[0]})
+    stage.say(
+        "Where did it end up? This is the embedding table again, with green where a number "
+        "will move up and red where it'll move down. Every row got a push, not just the "
+        "example's tokens, because the table is also the output layer: every token that "
+        "wasn't the right answer had its score pushed down, through its row. But the "
+        "example's own tokens, the ones that were read, got the biggest pushes."
+    )
+    stage.show(embedding_push(lab, -grads["embed"], used, stage.width))
     stage.say(
         "Here's the backward function for multiplying by a grid of weights, which does most "
         "of the work. Its rule is the one that gave w its −8: each weight's gradient is the "
@@ -276,12 +288,15 @@ def descent_table(rows: list[tuple[str, ...]]) -> Table:
 # ── The transformer ───────────────────────────────────────────────────────────
 
 
-def output_gradient(lab: Lab, probs: np.ndarray, right: int, top: int = 7) -> Table:
+def output_gradient(lab: Lab, probs: np.ndarray, right: int, width: int, top: int = 7) -> Table:
     grad = probs.copy()
     grad[right] -= 1.0
     order = [right, *[int(i) for i in np.argsort(-probs) if int(i) != right][: top - 1]]
+    tiles = max(len(label(lab.tokenizer, i)) + 2 for i in order)
+    beside = tiles + len("probability") + len("right?") + len("gradient") + len("push down") + 5 * 2
+    half = max(4, min(12, (width - beside - 1) // 2))  # each side of the bar's middle
     grid = Table.grid(padding=(0, 2))
-    for justify in ("left", "right", "right", "right", "left", "left"):
+    for justify in ("right", "right", "right", "right", "left", "left"):
         grid.add_column(justify=justify, no_wrap=True)
     grid.add_row(
         *(Text(h, style=viz.FAINT) for h in ("", "probability", "right?", "gradient", "", ""))
@@ -289,11 +304,11 @@ def output_gradient(lab: Lab, probs: np.ndarray, right: int, top: int = 7) -> Ta
     for i in order:
         is_right = i == right
         grid.add_row(
-            token_chip(lab.vocab, i),
+            chip(lab.tokenizer, i),
             viz.percent(float(probs[i])),
             Text("1" if is_right else "0", style="bold" if is_right else viz.FAINT),
             Text(f"{grad[i]:+.3f}", style="bold"),
-            viz.signed_bar(float(grad[i]), 1.0, 12, neg=viz.GREEN, pos=viz.RED),
+            viz.signed_bar(float(grad[i]), 1.0, half, neg=viz.GREEN, pos=viz.RED),
             Text(
                 "push up" if is_right else "push down",
                 style=viz.GREEN if is_right else viz.RED,
@@ -303,40 +318,52 @@ def output_gradient(lab: Lab, probs: np.ndarray, right: int, top: int = 7) -> Ta
     return grid
 
 
-def flow(grads: dict[str, np.ndarray], width: int) -> Iterator[Frame]:
-    names = list(PARTS)
-    norms = {n: float(np.sqrt((grads[n] ** 2).sum())) for n in names}
-    top = max(norms.values())
+def parts(lab: Lab, grads: dict[str, np.ndarray]) -> list[tuple[str, str, float]]:
+    """The model's parts from input to output, with the size of each one's gradient."""
+    c = lab.model.config
+
+    def size(names: list[str]) -> float:
+        return float(np.sqrt(sum((grads[n] ** 2).sum() for n in names)))
+
+    out = [("embeddings", "token table", size(["embed"]))]
+    for i in range(c.layers):
+        attn = [f"layers.{i}.attn.{n}" for n in ("norm", "query", "key", "value", "out")]
+        mlp = [f"layers.{i}.mlp.{n}" for n in ("norm", "gate", "up", "down")]
+        out.append((f"layer {i + 1}", "attention", size(attn)))
+        out.append(("", "MLP", size(mlp)))
+    out.append(("final norm", "", size(["norm"])))
+    return out
+
+
+def flow(lab: Lab, grads: dict[str, np.ndarray], width: int) -> Iterator[Frame]:
+    rows = parts(lab, grads)
+    top = max(n for *_, n in rows)
     decades = 3  # the bars are on a log scale, or the biggest would dwarf the rest
 
     def length(norm: float) -> float:
         return max(0.0, 1 + np.log10(max(norm, 1e-12) / top) / decades)
 
     bar_w = max(10, min(30, width - 50))
-    for revealed in range(len(names) + 1):
+    for revealed in range(len(rows) + 1):
         grid = Table.grid(padding=(0, 2))
         for justify in ("left", "left", "left", "right", "left"):
             grid.add_column(justify=justify, no_wrap=True)
-        grid.add_row("", "", Text("size of the gradient (log scale)", style=viz.FAINT), "", "")
-        last_layer = ""
-        for i, name in enumerate(names):
-            part = PARTS[name]
-            shown = i >= len(names) - revealed
-            front = i == len(names) - revealed
-            layer = part.layer if part.layer != last_layer else ""
-            last_layer = part.layer
+        grid.add_row("", "", Text("gradient size, log scale", style=viz.FAINT), "", "")
+        for i, (group, what, norm) in enumerate(rows):
+            shown = i >= len(rows) - revealed
+            front = i == len(rows) - revealed
             grid.add_row(
-                Text(layer, style="bold"),
-                Text(part.label, style="" if shown else viz.FAINT),
-                viz.bar(length(norms[name]), bar_w, viz.AMBER)
+                Text(group, style="bold"),
+                Text(what, style="" if shown else viz.FAINT),
+                viz.bar(length(norm), bar_w, viz.AMBER)
                 if shown
                 else Text("─" * bar_w, style=viz.FAINT),
-                Text(f"{norms[name]:.3f}" if shown else "", style=viz.FAINT),
+                Text(f"{norm:.3f}" if shown else "", style=viz.FAINT),
                 Text(
                     "◀ starts here"
-                    if name == names[-1]
+                    if i == len(rows) - 1
                     else "▲"
-                    if front and 0 < revealed < len(names)
+                    if front and 0 < revealed < len(rows)
                     else "",
                     style=viz.AMBER,
                 ),
@@ -345,16 +372,29 @@ def flow(grads: dict[str, np.ndarray], width: int) -> Iterator[Frame]:
     yield hold(grid, 0.3)
 
 
-def embedding_push(lab: Lab, push: np.ndarray, used: set[int]) -> Table:
+def embedding_push(
+    lab: Lab, push: np.ndarray, used: list[int], width: int, others: int = 6
+) -> Table:
+    """The push on some rows of the embedding table: the tokens read, then a few others."""
+    tok = lab.tokenizer
+    rest = [int(i) for i in np.argsort(-np.abs(push).sum(axis=1)) if int(i) not in used][:others]
+    shown = used[:10] + rest
+    scale = viz.scale_of(push[shown])
+    sizes = [f"{float(np.abs(push[t]).sum()):.3f}" for t in shown]
+    tiles = max(len(label(tok, t)) + 2 for t in shown)
+    numbers = tiles + 1 + push.shape[1] + 1 + max(map(len, sizes)) <= width  # room for sizes?
     grid = Table.grid(padding=(0, 1))
+    grid.add_column(no_wrap=True, justify="right")
     grid.add_column(no_wrap=True)
-    lines = viz.nudge_blocks(push, width=2)
-    for line in lines:
-        grid.add_row(line)
-    letters = Text(no_wrap=True)
-    for i, ch in enumerate(lab.vocab.chars):
-        letters.append(f"{ch:<2}", style=f"bold {viz.ACCENT}" if i in used else viz.FAINT)
-    grid.add_row(letters)
-    grid.add_row(Text(""))
-    grid.add_row(viz.legend(viz.NUDGE, "down", "up"))
+    grid.add_column(no_wrap=True, justify="right")
+    for group, rows in (("read in the example", used[:10]), ("not in the example", rest)):
+        grid.add_row("", Text(group, style=viz.FAINT), "")
+        for token in rows:
+            grid.add_row(
+                chip(tok, token),
+                viz.cells(push[token], (viz.NUDGE.diverging(v, scale) for v in push[token]), 1),
+                Text(sizes[shown.index(token)] if numbers else "", style=viz.FAINT),
+            )
+    grid.add_row("", Text(""), "")
+    grid.add_row("", viz.legend(viz.NUDGE, "down", "up"), "")
     return grid

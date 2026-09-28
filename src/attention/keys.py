@@ -55,12 +55,15 @@ class Keys:
 
             termios.tcsetattr(self.fd, termios.TCSADRAIN, self.saved)
 
-    def read(self, timeout: float | None = None) -> str | None:
-        """The next key, or None if none arrives within `timeout` seconds."""
+    def read(self, timeout: float | None = None, typing: bool = False) -> str | None:
+        """The next key, or None if none arrives within `timeout` seconds.
+
+        Letters come back lowercase, unless `typing`, when their case matters.
+        """
         raw = _read_windows(timeout) if os.name == "nt" else self._read_posix(timeout)
         if raw is None:
             return None
-        return NAMES.get(raw, raw.lower() if len(raw) == 1 else raw)
+        return NAMES.get(raw, raw if typing or len(raw) != 1 else raw.lower())
 
     def _read_posix(self, timeout: float | None) -> str | None:
         import select

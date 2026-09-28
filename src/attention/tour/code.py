@@ -15,4 +15,4 @@ def excerpt(func: Callable, start: str | None = None, end: str | None = None) ->
     first = next((i for i, line in enumerate(lines) if start and start in line), 0)
     last = next((i for i, line in enumerate(lines) if end and end in line and i > first), None)
     chunk = textwrap.dedent("\n".join(lines[first:last])).strip("\n")
-    return Syntax(chunk, "python", theme="ansi_dark", background_color="default", word_wrap=False)
+    return Syntax(chunk, "python", theme="ansi_dark", background_color="default", word_wrap=True)

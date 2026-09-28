@@ -1,59 +1,25 @@
 import numpy as np
+import pytest
 
-from attention.corpus import built_in
 from attention.explain import influence, nudge
-from attention.generate import choose, invent, log_prob, nucleus, picks, sample
-from attention.train import prepare
-
-
-def trained(key="dinosaurs", seed=2):
-    trainer = prepare(built_in(key), seed=seed)
-    while not trainer.done:
-        trainer.step()
-    return trainer.model, trainer.data.vocab
+from attention.generate import (
+    Memory,
+    choose,
+    dials,
+    log_probs,
+    nucleus,
+    picks,
+    prompt,
+    samples,
+    top_k,
+    write,
+)
+from attention.tokenizer import END
 
 
 def test_choose_lines_probabilities_up_from_zero_to_one():
     probs = np.array([0.5, 0.25, 0.25])
     assert [choose(probs, r) for r in (0.0, 0.49, 0.5, 0.74, 0.75, 0.999)] == [0, 0, 1, 1, 2, 2]
-
-
-def test_writing_stops_at_the_boundary_and_respects_the_prefix():
-    model, vocab = trained()
-    rng = np.random.default_rng(0)
-    steps = list(picks(model, vocab, rng, prefix="steg"))
-    assert steps[0].context == ".steg"
-    assert all(abs(p.probs.sum() - 1) < 1e-9 for p in steps)
-    assert steps[-1].done or len(steps[-1].context) == model.config.context
-    assert sample(model, vocab, rng, prefix="steg").startswith("steg")
-
-
-def test_cold_sampling_is_less_varied_than_hot():
-    model, vocab = trained("names")
-    rng = np.random.default_rng(1)
-    cold = {sample(model, vocab, rng, temperature=0.2) for _ in range(30)}
-    hot = {sample(model, vocab, rng, temperature=1.5) for _ in range(30)}
-    assert len(cold) < len(hot)
-    assert len(invent(model, vocab, rng, 5)) == 5
-
-
-def test_backprop_to_the_inputs_leaves_the_weights_alone():
-    model, vocab = trained()
-    before = {k: v.copy() for k, v in model.params.items()}
-    report = influence(model, vocab, "stegosa")
-    assert report.sizes.shape == (8,)
-    assert (report.sizes > 0).all()
-    assert vocab.chars[report.top] == "u"
-    for k, v in model.params.items():
-        np.testing.assert_array_equal(v, before[k])
-
-
-def test_one_step_toward_a_letter_makes_it_likelier():
-    model, vocab = trained()
-    target = vocab.chars.index("e")
-    change = nudge(model, vocab, "stegosa", target)
-    assert change.after[target] > change.before[target]
-    assert change.after[target] >= 0.2 or change.lr == 4.0
 
 
 def test_top_p_keeps_the_fewest_tokens_that_reach_p():
@@ -63,17 +29,70 @@ def test_top_p_keeps_the_fewest_tokens_that_reach_p():
     np.testing.assert_array_equal(nucleus(probs, 1.0), probs)
 
 
-def test_top_p_sampling_only_picks_from_the_nucleus():
-    model, vocab = trained()
-    rng = np.random.default_rng(3)
-    for pick in picks(model, vocab, rng, top_p=0.5):
-        assert pick.probs[pick.token] > 0
-        assert (pick.probs > 0).sum() <= len(pick.probs)
+def test_top_k_keeps_the_k_likeliest():
+    probs = np.array([0.1, 0.5, 0.15, 0.25])
+    np.testing.assert_allclose(top_k(probs, 2), [0, 0.5 / 0.75, 0, 0.25 / 0.75])
+    np.testing.assert_array_equal(top_k(probs, 0), probs)
+    cold = dials(np.array([2.0, 1.0, 0.0]), temperature=0.1)
+    assert cold[0] > 0.99
 
 
-def test_log_prob_scores_every_letter_and_the_ending():
-    model, vocab = trained()
-    lp = log_prob(model, vocab, "stegosaurus")
-    assert lp.shape == (len("stegosaurus") + 1,)
+def test_writing_carries_on_from_the_prompt_until_the_end(trained, rng):
+    model, tok = trained.model, trained.data.tokenizer
+    steps = list(picks(model, prompt(tok, "The Fox and the"), rng, limit=40))
+    assert tok.decode(steps[0].context) == "The Fox and the"
+    assert steps[0].context[0] == END
+    assert all(abs(p.probs.sum() - 1) < 1e-9 for p in steps)
+    assert steps[-1].done or len(steps) == 40
+    assert steps[1].weights.shape == (2, 4, len(steps[1].context))  # layers, heads, positions
+    assert isinstance(write(model, tok, rng, "The Fox", limit=10), str)
+    assert len(samples(model, tok, rng, 3, limit=5)) == 3
+
+
+def test_writing_with_the_cache_matches_rereading_everything(trained):
+    model, tok = trained.model, trained.data.tokenizer
+    steps = list(picks(model, prompt(tok, "A Wolf"), np.random.default_rng(1), limit=12))
+    for pick in steps:
+        again = model.forward(np.array([pick.context])).probs[0, -1]
+        np.testing.assert_allclose(pick.probs, again, atol=1e-10)
+
+
+def test_the_context_window_stops_the_writing(trained, rng):
+    ids = [END] * (trained.model.config.context - 3)
+    assert len(list(picks(trained.model, ids, rng, stop=(), limit=100))) == 3
+
+
+def test_copies_of_the_training_text_are_spotted(trained):
+    memory = Memory(trained.data.train)
+    copied = trained.data.train[1000:1030]
+    invented = np.random.default_rng(0).integers(100, 500, 30)
+    assert memory.copied(copied).all() and memory.longest(copied) == 30
+    assert not memory.copied(invented).any()
+    mixed = np.concatenate([invented[:10], copied[:15], invented[10:20]])
+    assert list(np.flatnonzero(memory.copied(mixed))) == list(range(10, 25))
+
+
+def test_log_probs_score_every_token_and_the_ending(trained):
+    tok = trained.data.tokenizer
+    lp = log_probs(trained.model, tok, "The Fox and the Grapes")
+    assert lp.shape == (len(tok.encode("The Fox and the Grapes")),)
     assert (lp <= 0).all()
-    assert lp.sum() > log_prob(model, vocab, "sgteosuarsu").sum()
+
+
+def test_backprop_to_the_inputs_leaves_the_weights_alone(trained):
+    model, tok = trained.model, trained.data.tokenizer
+    before = {k: v.copy() for k, v in model.params.items()}
+    report = influence(model, prompt(tok, "The Fox and the"))
+    assert report.sizes.shape == (len(report.ids),)
+    assert (report.sizes > 0).all()
+    assert report.runner_up not in (report.top, END)
+    for k, v in model.params.items():
+        np.testing.assert_array_equal(v, before[k])
+
+
+def test_one_step_toward_a_token_makes_it_likelier(trained):
+    model, tok = trained.model, trained.data.tokenizer
+    target = tok.encode(" Crane")[0]
+    change = nudge(model, prompt(tok, "The Wolf and the"), target)
+    assert change.after[target] > change.before[target]
+    assert change.after[target] >= 0.2 or change.lr == pytest.approx(4.0)

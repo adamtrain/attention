@@ -3,77 +3,89 @@ import pytest
 
 from attention.corpus import (
     BUILT_IN,
+    SEPARATOR,
+    VOCAB,
     Dataset,
-    Vocab,
     built_in,
-    clean,
-    common_ending,
+    common_topic,
+    documents,
     from_file,
     load,
 )
+from attention.tokenizer import END
 
 
 @pytest.mark.parametrize("key", list(BUILT_IN))
-def test_built_in_corpora_load_and_fit(key):
+def test_built_in_corpora_load_with_a_good_example(key):
     corpus = built_in(key)
-    assert len(corpus.words) > 300
-    assert corpus.example in corpus.words
-    assert all(w.isalpha() and w.islower() for w in corpus.words)
-    assert len(set(corpus.words)) == len(corpus.words)
-    assert 20 <= sum(corpus.niche.has(w) for w in corpus.words) <= len(corpus.words) // 5
+    assert len(corpus.documents) > 100
+    assert corpus.characters > 500_000
+    text = "\n\n".join(corpus.documents)
+    assert corpus.example.split("\n\n")[-1][:40] in text
+    assert all(SEPARATOR not in d and d.strip() == d for d in corpus.documents)
+    assert 0.03 < sum(map(corpus.niche.has, corpus.documents)) / len(corpus.documents) < 0.3
 
 
-def test_clean_keeps_letters_and_drops_repeats_and_giants():
-    assert clean(["Tyrannosaurus!", "tyrannosaurus", "  T-Rex ", "x", "a" * 40]) == (
-        "tyrannosaurus",
-        "trex",
+def test_versions_of_one_fable_are_held_back_together():
+    corpus = built_in("fables")
+    data = Dataset.split(corpus, np.random.default_rng(1))
+    held = {corpus.family(d) for d in data.val_docs}
+    assert held and not held & {corpus.family(d) for d in data.train_docs}
+    grapes = [d for d in corpus.documents if d.startswith("The Fox and the Grapes\n")]
+    assert len(grapes) >= 3  # one title, several translations
+
+
+def test_the_split_is_seeded_and_the_tokenizer_learns_only_from_training_text():
+    corpus = built_in("shakespeare")
+    a = Dataset.split(corpus, np.random.default_rng(4))
+    b = Dataset.split(corpus, np.random.default_rng(4))
+    assert a.val_docs == b.val_docs
+    assert len(a.val_docs) == round(len(corpus.documents) * 0.1)
+    assert len(a.tokenizer) == VOCAB
+    assert a.train[0] == END and a.val[0] == END
+    assert (a.train == END).sum() == len(a.train_docs) + 1
+
+
+def test_windows_are_the_next_token_at_every_position():
+    data = Dataset.split(built_in("fables"), np.random.default_rng(0))
+    inputs, targets = data.windows(np.random.default_rng(1), 4, 16)
+    assert inputs.shape == targets.shape == (4, 16)
+    np.testing.assert_array_equal(inputs[:, 1:], targets[:, :-1])
+    fixed = data.fixed(5, 16)
+    np.testing.assert_array_equal(fixed[0], data.fixed(5, 16)[0])
+
+
+def test_documents_split_at_markers_or_blank_lines():
+    assert documents(f"one\n{SEPARATOR}\ntwo\n") == ("one", "two")
+    many = "\n\n\n".join(f"Doc {i}. Some words here." for i in range(25))
+    assert len(documents(many)) == 25
+    one_long = "\n\n".join(f"Paragraph {i} " + "word " * 80 for i in range(30))
+    assert 1 < len(documents(one_long)) < 30  # cut into pages
+
+
+def test_your_own_text_files(tmp_path):
+    path = tmp_path / "moby.txt"
+    path.write_text(
+        "\n\n\n".join(
+            f"Chapter {i}. Call me Ishmael, said the sailor to Queequeg on the {i}th day. "
+            + "The whale swam on. " * 30
+            for i in range(40)
+        )
     )
-
-
-def test_vocab_round_trips_with_the_boundary_first():
-    vocab = Vocab.of(("emma", "ava"))
-    assert vocab.chars == ".aemv"
-    assert vocab.sequence("emma") == [0, 2, 3, 3, 1, 0]
-    assert vocab.decode(vocab.encode("ave")) == "ave"
-
-
-def test_batches_shift_targets_by_one_and_pad_with_minus_one():
-    data = Dataset.split(built_in("names"), np.random.default_rng(0))
-    inputs, targets = data.batch(["ava", "emma"])
-    v = data.vocab
-    assert inputs.shape == targets.shape == (2, 5)
-    assert v.decode(inputs[1]) == ".emma"
-    assert v.decode(targets[1]) == "emma."
-    assert list(targets[0, 4:]) == [-1]
-
-
-def test_split_holds_back_a_tenth_and_is_seeded():
-    corpus = built_in("dinosaurs")
-    a = Dataset.split(corpus, np.random.default_rng(1))
-    b = Dataset.split(corpus, np.random.default_rng(1))
-    assert a.val == b.val
-    assert len(a.val) == round(len(corpus.words) * 0.1)
-    assert not set(a.val) & set(a.train)
-    assert a.context == max(len(w) for w in corpus.words) + 1
-
-
-def test_word_lists_from_files(tmp_path):
-    path = tmp_path / "planets.txt"
-    path.write_text("\n".join(f"planet{chr(97 + i % 26)}{chr(97 + i // 26)}" for i in range(40)))
     corpus = load(str(path))
-    assert corpus.key == "planets"
-    assert corpus.probe and corpus.example.startswith(corpus.probe)
-    (tmp_path / "few.txt").write_text("one\ntwo\n")
-    with pytest.raises(ValueError, match="at least 20"):
+    assert corpus.key == "moby" and len(corpus.documents) == 40
+    assert corpus.example and corpus.probe and corpus.example.startswith(corpus.probe)
+    (tmp_path / "few.txt").write_text("Too short.\n")
+    with pytest.raises(ValueError, match="at least"):
         from_file(tmp_path / "few.txt")
     with pytest.raises(ValueError, match="No corpus"):
         load("nonexistent-corpus")
 
 
-def test_custom_word_lists_get_a_niche():
-    words = tuple(f"{a}{b}ville" for a in "bcdfg" for b in "aeiou") + tuple(
-        f"{a}{b}{c}" for a in "bcdfghklm" for b in "aeiou" for c in "npt"
+def test_custom_text_gets_a_niche():
+    docs = tuple(
+        f"Once the Captain met a sailor{', and Queequeg sang' if i % 5 == 0 else ''}. The end."
+        for i in range(40)
     )
-    niche = common_ending(words)
-    assert niche.ending == "ville"
-    assert niche.label == "words ending in -ville"
+    niche = common_topic(docs)
+    assert niche.has(docs[0]) and not niche.has(docs[1])

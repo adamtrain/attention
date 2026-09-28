@@ -1,4 +1,4 @@
-"""attention: a guided tour of how LLMs work, with a tiny transformer you train yourself."""
+"""attention: a guided tour of how LLMs work, with a small language model you train yourself."""
 
 from importlib.metadata import version
 

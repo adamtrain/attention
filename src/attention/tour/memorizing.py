@@ -1,4 +1,4 @@
-"""Chapter: overfitting. What happens when a model is too big, or trains too long."""
+"""Chapter: overfitting. What happens when a model has too little to read, for too long."""
 
 from __future__ import annotations
 
@@ -11,73 +11,111 @@ from rich.table import Table
 from rich.text import Text
 
 from .. import viz
-from ..generate import invent
+from ..corpus import Dataset, stream
+from ..generate import Memory, picks
 from ..model import Config, Transformer
-from ..train import Trainer, evaluate, smooth
-from ..views import display
+from ..tokenizer import END
+from ..train import Trainer, evaluate
+from ..views import running
 from .lab import Lab
 from .stage import Frame, Stage
 
-WIDTH, HIDDEN = 32, 128  # about three and a half times your model
-STEPS = 1600  # four times as long
-SECONDS = 16
-FPS = 15
-SAMPLES = 8
+SHARE = 0.05  # of the training documents the overfitting model gets to read
+CONTEXT = 64  # shorter windows, to train faster
+SECONDS = 20
+FPS = 12
+EVERY = 50  # steps between check-ups
 
 
 @dataclass
 class Run:
-    """The oversized model, training, and what it writes along the way."""
+    """The model with too little to read, training, and what it recites along the way."""
 
     trainer: Trainer
-    known: set[str]  # the words it trains on
-    rng: np.random.Generator
-    samples: list[str] = field(default_factory=list)
+    memory: Memory
+    seen: list[int]  # the start of a document it trains on
+    unseen: list[int]  # the start of one it never sees
+    own: tuple[np.ndarray, np.ndarray]  # stretches of its own text, to measure it on
     val: list[tuple[int, float]] = field(default_factory=list)
+    mine: list[tuple[int, float]] = field(default_factory=list)
+    recited: list[int] = field(default_factory=list)
+    guessed: list[int] = field(default_factory=list)
 
     @classmethod
     def start(cls, lab: Lab) -> Run:
-        data = lab.data
-        config = Config(len(data.vocab), data.context, width=WIDTH, heads=2, hidden=HIDDEN)
-        model = Transformer.create(config, lab.dice(7))
-        trainer = Trainer(model, data, lab.dice(8), steps=STEPS, decay=0.0)
-        run = cls(trainer, set(data.train), lab.dice(9))
+        data, tok = lab.data, lab.tokenizer
+        rng = lab.dice(7)
+        count = max(8, round(len(data.train_docs) * SHARE))
+        docs = tuple(
+            data.train_docs[int(i)]
+            for i in sorted(rng.choice(len(data.train_docs), count, replace=False))
+        )
+        little = Dataset(tok, docs, data.val_docs, stream(tok, docs), data.val)
+        sizes = {
+            k: getattr(lab.model.config, k)
+            for k in ("width", "layers", "heads", "kv_heads", "hidden")
+        }
+        model = Transformer.create(Config(len(tok), CONTEXT, **sizes), rng)
+        trainer = Trainer(model, little, lab.dice(8), steps=lab.budget.memorizing, decay=0.0)
+        long_enough = [d for d in docs if len(tok.encode(d)) > 60] or list(docs)
+        seen = [END, *tok.encode(opening(long_enough[0]))]
+        other = min(data.val_docs, key=lambda d: abs(len(d) - len(long_enough[0])))
+        unseen = [END, *tok.encode(opening(other))]
+        own = little.fixed(16, CONTEXT, held_back=False)
+        run = cls(trainer, Memory(little.train), seen, unseen, own)
         run.check()
         return run
 
     def check(self) -> None:
         tr = self.trainer
-        self.val.append((tr.step_number, evaluate(tr.model, tr.data, tr.data.val)))
-        self.samples = invent(tr.model, tr.data.vocab, self.rng, SAMPLES, temperature=0.8)
+        self.val.append((tr.step_number, evaluate(tr.model, *self.trainer.data.fixed(16, CONTEXT))))
+        self.mine.append((tr.step_number, evaluate(tr.model, *self.own)))
+        self.recited = recite(tr.model, self.seen)
+        self.guessed = recite(tr.model, self.unseen)
 
     def step(self) -> None:
         self.trainer.step()
-        if self.trainer.step_number % 40 == 0:
+        if self.trainer.step_number % EVERY == 0 or self.trainer.done:
             self.check()
 
     @property
-    def copies(self) -> int:
-        return sum(w in self.known for w in self.samples)
+    def copied(self) -> float:
+        marks = self.memory.copied(self.seen + self.recited)[len(self.seen) :]
+        return float(marks.mean()) if len(marks) else 0.0
 
     @property
     def best(self) -> tuple[int, float]:
         return min(self.val, key=lambda sv: sv[1])
 
 
+def opening(doc: str, words: int = 3) -> str:
+    """How a document begins: its title (or first line) and its first few words."""
+    head, sep, rest = doc.partition("\n\n" if "\n\n" in doc[:100] else "\n")
+    return head + sep + " ".join(rest.split(" ")[:words])
+
+
+def recite(model: Transformer, start: list[int], most: int = 40) -> list[int]:
+    """Carry on from `start`, cautiously (temperature 0.3), with the same dice every time."""
+    rng = np.random.default_rng(0)
+    return [p.token for p in picks(model, start, rng, temperature=0.3, limit=most)]
+
+
 def run(stage: Stage, lab: Lab) -> None:
     c, tr = lab.corpus, lab.trainer
+    n = max(8, round(len(lab.data.train_docs) * SHARE))
     stage.say(
-        f"Why did training stop at {tr.steps} steps? And why such a small model? Let's break "
-        "the rules and see. Here's a model about three and a half times bigger "
-        f"({WIDTH} numbers per token instead of {lab.model.config.width}), trained four times as "
-        "long, and without a safeguard called weight decay that your model had (more on it "
-        f"below), on the same {len(lab.data.train)} {c.plural}. Your own model isn't touched."
+        f"Why did your model train on all {len(lab.data.train_docs)} {c.plural}, with weight "
+        "decay (more on that below), and stop when it did? Let's break the rules and see. Here's "
+        f"a model the same size as yours, given just {n} of the {c.plural} to read, trained on "
+        f"them for {lab.budget.memorizing:,} steps (about "
+        f"{lab.budget.memorizing * tr.batch_size * CONTEXT / max(1, sum(len(lab.tokenizer.encode(d)) for d in lab.data.train_docs[:n])):.0f} "
+        "passes over its text), with no weight decay. Your own model isn't touched."
     )
     stage.say(
-        "Watch the two lines: [accent]training loss[/accent] on the words it studies, and "
-        f"[amber]held-back loss[/amber] on the {c.plural} it never sees. And watch how many of "
-        "its samples are [b]copies[/b] of words it trained on. The green line is your own "
-        "model's held-back loss, for comparison."
+        "Watch the two lines: [accent]its loss on its own text[/accent], and "
+        f"[amber]its loss on held-back {c.plural}[/amber] it never sees. The green line is your "
+        "model's held-back loss, for comparison. On the right: give it the first few tokens of "
+        f"one of its own {c.plural}, and of one it never saw, and see how it carries on."
     )
 
     yours = tr.val_losses[-1][1] if tr.val_losses else lab.baselines.pairs
@@ -85,52 +123,69 @@ def run(stage: Stage, lab: Lab) -> None:
 
     def training() -> Iterator[Frame]:
         nonlocal big
-        if big.trainer.step_number:  # a replay: a new big model, from new random numbers
+        if big.trainer.step_number:  # a replay: a new model, from new random numbers
             big = Run.start(lab)
         return overfit(lab, big, yours, stage.width)
 
     stage.play(training, fps=FPS, start="break the rules", again="try another")
-    if big.trainer.step_number % 40:
-        big.check()
 
     at, low = big.best
     last = big.val[-1][1]
     uniform = lab.baselines.uniform
     worse = f", worse than the {uniform:.2f} of pure guessing" if last > uniform else ""
-    trained_loss = smooth(big.trainer.losses, 0.08)[-1]
+    if big.copied >= 0.8:
+        recites = f"it now recites it, word for word ({big.copied:.0%} of what it wrote)"
+    elif big.copied >= 0.2:
+        recites = f"it recites whole stretches of it ({big.copied:.0%} of what it wrote)"
+    else:
+        recites = f"it has begun to recite bits of it ({big.copied:.0%} of what it wrote)"
     stage.say(
-        f"On the words it studied, it kept improving, down to {trained_loss:.2f}. But its "
-        f"held-back loss bottomed out at {low:.2f} around step {at}, then climbed to "
-        f"[b]{last:.2f}[/b]{worse}. And {big.copies} of its last {SAMPLES} samples are copies."
+        f"On its own text it kept improving, down to {big.mine[-1][1]:.2f}. But its held-back "
+        f"loss bottomed out at {low:.2f} around step {at}, then climbed to [b]{last:.2f}[/b]"
+        f"{worse}. And given the start of one of its {c.plural}, {recites}."
+    )
+    mine = recite(lab.model, big.seen)
+    stage.say("Your model, given the same start, carries on in its own words:")
+    stage.show(
+        *running(
+            lab.tokenizer,
+            big.seen + mine,
+            stage.width - 4,
+            lab.memory.copied(big.seen + mine),
+            start=len(big.seen),
+        )
     )
     stage.say(
-        "It [b]memorized[/b] its training words instead of learning what they have in common, "
-        "so it got better at the test it had already seen and worse at everything else. That's "
-        "called [b]overfitting[/b], and it's why the dashboard kept an eye on the held-back "
-        f"words. Yours ended at {yours:.2f}. It had three defenses: it's smaller, it stopped "
-        "sooner, and it used weight decay."
+        "The other model [b]memorized[/b] its text instead of learning what it has in common "
+        "with everything else, so it got better at the test it had seen and worse at "
+        "everything else. That's called [b]overfitting[/b], and it's why the dashboard kept an "
+        f"eye on held-back text. Yours ended at {yours:.2f}. It had three defenses: far more "
+        "text to learn from, fewer passes over it, and weight decay."
     )
     stage.say(
         "[b]Weight decay[/b] shrinks every weight a little toward zero, every step. A weight "
         "only stays big if the gradient keeps pushing it back up. Memorizing one particular "
-        "word takes weights that only that word pushes on, now and then, so they wear away. "
-        "Patterns that help lots of words get pushed on at every step, so they survive. Adam "
-        "with weight decay is called [b]AdamW[/b], and it's what nearly every language model "
-        "trains with."
+        "passage takes weights that only that passage pushes on, now and then, so they wear "
+        "away. Patterns that help with lots of text get pushed on at every step, so they "
+        "survive. Adam with weight decay is AdamW, the optimizer from the gradient descent "
+        "chapter."
     )
     stage.note(
         "The real cure is more data. Large language models learn from so much text that they "
-        "see most of it only once or twice. Text that turns up again and again, like famous "
-        "quotes, can still end up memorized word for word."
+        "see most of it only once or twice. But text that turns up again and again, like famous "
+        "quotes, licenses and the opening lines of books, can still end up memorized word for "
+        "word, and researchers have pulled memorized text out of real models just like this: "
+        "by giving them the start and letting them carry on."
     )
 
 
 def overfit(lab: Lab, big: Run, yours: float, width: int) -> Iterator[Frame]:
     yield view(lab, big, yours, width)
     total, shown = SECONDS * FPS, 0
+    steps = big.trainer.steps
     while not big.trainer.done:
         shown += 1
-        target = STEPS * min(1.0, shown / total)
+        target = steps * min(1.0, shown / total)
         big.step()
         while big.trainer.step_number < target and not big.trainer.done:
             big.step()
@@ -139,52 +194,45 @@ def overfit(lab: Lab, big: Run, yours: float, width: int) -> Iterator[Frame]:
 
 def view(lab: Lab, big: Run, yours: float, width: int) -> Table:
     tr = big.trainer
+    tok = lab.tokenizer
     uniform = lab.baselines.uniform
     hi = max(uniform + 0.3, max(v for _, v in big.val) + 0.2)
-    plot_w = max(30, min(52, width - 34))
-    plot = viz.Plot(plot_w, 10, x_max=STEPS, lo=0.0, hi=float(np.ceil(hi * 2) / 2))
+    plot_w = max(30, min(46, width - 44))
+    plot = viz.Plot(plot_w, 10, x_max=tr.steps, lo=0.0, hi=float(np.ceil(hi)))
     plot.guide(uniform, viz.FAINT, "guessing")
-    plot.guide(yours, viz.GREEN, "your model")
-    if tr.losses:
-        plot.line(list(enumerate(smooth(tr.losses, 0.08), 1)), viz.ACCENT)
+    plot.guide(yours, viz.GREEN, "yours")
+    plot.line(big.mine, viz.ACCENT)
     plot.line(big.val, viz.AMBER)  # on top: it's the one that counts
     at, low = big.best
-    if tr.step_number > at + 120:
+    if tr.step_number > at + 200:
         plot.mark(at, low, "▼", f"bold {viz.GREEN}")
-    now = smooth(tr.losses, 0.08)[-1] if tr.losses else uniform
     legend = Text.assemble(
-        ("━ ", viz.ACCENT), ("training ", viz.FAINT), (f"{now:.2f}", "bold"),
+        ("━ ", viz.ACCENT), ("its own text ", viz.FAINT), (f"{big.mine[-1][1]:.2f}", "bold"),
         ("   ━ ", viz.AMBER), ("held back ", viz.FAINT), (f"{big.val[-1][1]:.2f}", "bold"),
-        ("   ▼ ", viz.GREEN), ("its best", viz.FAINT),
     )  # fmt: skip
     progress = Text.assemble(
-        ("step ", viz.FAINT), (f"{tr.step_number:>4}", "bold"), (f" / {STEPS}  ", viz.FAINT),
-        viz.bar(tr.step_number / STEPS, 20, viz.ACCENT),
-        (f"   {tr.model.size:,} parameters", viz.FAINT),
+        ("step ", viz.FAINT), (f"{tr.step_number:>4}", "bold"), (f" / {tr.steps}  ", viz.FAINT),
+        viz.bar(tr.step_number / tr.steps, 16, viz.ACCENT),
     )  # fmt: skip
-    left = Group(progress, Text(""), Text("loss", style="bold"), *plot.render(), legend)
+    left = Group(progress, Text(""), Text("loss", style="bold"), *plot.render(fmt="{:.0f}"), legend)
 
-    lines = [Text.assemble(("it writes", "bold"), (f" at step {tr.step_number}", viz.FAINT))]
-    for w in big.samples:
-        copied = w in big.known
-        shown = display(w) if len(w) <= 16 else display(w)[:15] + "…"
-        lines.append(
-            Text.assemble(
-                ("· " if copied else "✦ ", viz.RED if copied else viz.GREEN),
-                (shown, viz.FAINT if copied else ""),
-                (" copy" if copied else "", viz.RED),
-            )
-        )
-    lines.append(Text(""))
-    lines.append(
+    side = max(24, width - plot_w - 14)
+    seen_ids = big.seen + big.recited
+    unseen_ids = big.unseen + big.guessed
+    right = [Text("its own text, from the start:", style="bold")]
+    right += running(tok, seen_ids, side, big.memory.copied(seen_ids), start=len(big.seen))[:5]
+    right += [Text(""), Text("text it never saw:", style="bold")]
+    right += running(tok, unseen_ids, side, None, start=len(big.unseen))[:4]
+    right += [
+        Text(""),
         Text.assemble(
-            ("copies ", viz.FAINT),
-            viz.bar(big.copies / SAMPLES, 10, viz.RED),
-            (f" {big.copies} of {SAMPLES}", "bold"),
-        )
-    )
+            ("recited ", viz.FAINT),
+            viz.bar(big.copied, 10, viz.RED),
+            (f" {big.copied:.0%}", "bold"),
+        ),
+    ]
     grid = Table.grid(padding=(0, 4))
     grid.add_column(no_wrap=True)
-    grid.add_column(no_wrap=True, vertical="bottom")
-    grid.add_row(left, Group(*lines))
+    grid.add_column(no_wrap=True, vertical="top")
+    grid.add_row(left, Group(*right))
     return grid

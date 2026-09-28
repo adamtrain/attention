@@ -317,6 +317,28 @@ class Stage:
         """The next key the viewer presses (q still quits)."""
         return self._key(timeout)
 
+    def line(self, live: Live, show: Callable[[str], RenderableType], most: int = 80) -> str | None:
+        """A line of text typed by the viewer: enter to finish, escape or → to give up.
+
+        `show(text)` draws the picture with the text so far in it. Here q is just a letter.
+        """
+        if self.keys is None:
+            return None
+        text = ""
+        while True:
+            live.update(self.pad(show(text)), refresh=True)
+            key = self.keys.read(None, typing=True)
+            if key in ("escape", "right"):
+                return None
+            if key == "enter":
+                return text.strip() or None
+            if key == "backspace":
+                text = text[:-1]
+            elif key == "space":
+                text += " "
+            elif key and len(key) == 1 and key.isprintable() and len(text) < most:
+                text += key
+
 
 def hold(frame: RenderableType, seconds: float) -> tuple[RenderableType, float]:
     return frame, seconds

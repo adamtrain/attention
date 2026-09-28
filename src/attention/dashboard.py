@@ -1,4 +1,4 @@
-"""The live training dashboard: watch the loss fall, the weights shift and the samples improve."""
+"""The live training dashboard: watch the loss fall, the layers wake up and the samples improve."""
 
 from __future__ import annotations
 
@@ -15,19 +15,14 @@ from rich.text import Text
 
 from . import viz
 from .corpus import Corpus
-from .generate import invent
-from .model import LAYERS, softmax
+from .generate import Memory, picks, prompt
+from .model import groups
 from .train import Baselines, Step, Trainer, smooth
-from .views import display, token_chip
+from .views import chip, prob_bars, running
 
-SAMPLE_EVERY = 20
-EVAL_EVERY = 20
-LAYER_NAMES = {
-    "head": "head",
-    "mlp": "MLP",
-    "attention": "attention",
-    "embeddings": "embeddings",
-}
+SAMPLE_EVERY = 100
+EVAL_EVERY = 50
+SAMPLE_TOKENS = 48
 
 
 @dataclass
@@ -39,25 +34,22 @@ class Watch:
     corpus: Corpus
     seed: int
     rng: np.random.Generator  # for samples, so watching doesn't change how training goes
-    samples: list[str] = field(default_factory=list)
+    sample: list[int] = field(default_factory=list)
     sample_step: int = 0
     last: Step | None = None
-    weight_scale: float = 0.0
     compute: float = 0.0  # seconds spent actually training, not drawing
+    memory: Memory = field(init=False)
 
     def __post_init__(self) -> None:
-        self.weight_scale = viz.scale_of(self.trainer.model.params["embed.token"])
+        self.memory = Memory(self.trainer.data.train)
         if not self.trainer.val_losses:
             self.trainer.evaluate()
         self.resample()
 
-    @property
-    def known(self) -> set[str]:
-        return set(self.corpus.words)
-
     def resample(self) -> None:
         tr = self.trainer
-        self.samples = invent(tr.model, tr.data.vocab, self.rng, 6, temperature=0.8)
+        steps = list(picks(tr.model, prompt(tr.data.tokenizer), self.rng, 0.8, limit=SAMPLE_TOKENS))
+        self.sample = [*steps[-1].context, steps[-1].token] if steps else []
         self.sample_step = tr.step_number
 
     def step(self) -> Step:
@@ -77,19 +69,23 @@ class Watch:
     def render(self, width: int) -> RenderableType:
         inner = width - 6
         tr = self.trainer
+        tokens = tr.step_number * tr.batch_size * tr.model.config.context
+        passes = tokens / max(len(tr.data.train), 1)
         progress = Text.assemble(
-            ("step ", viz.FAINT), (f"{tr.step_number:>3}", "bold"), (f" / {tr.steps}  ", viz.FAINT),
-            viz.bar(tr.step_number / tr.steps, max(10, inner - 44), viz.ACCENT),
+            ("step ", viz.FAINT), (f"{tr.step_number:>4}", "bold"), (f" / {tr.steps}  ", viz.FAINT),
+            viz.bar(tr.step_number / tr.steps, max(10, inner - 70), viz.ACCENT),
             (f" {tr.step_number / tr.steps:4.0%}", "bold"),
-            ("   learning rate ", viz.FAINT), (f"{tr.learning_rate():.4f}", viz.AMBER),
+            ("   lr ", viz.FAINT), (f"{tr.learning_rate():.4f}", viz.AMBER),
+            ("   read ", viz.FAINT), (f"{tokens / 1e6:.1f}M", "bold"), (" tokens", viz.FAINT),
+            (f" ({passes:.1f}× the text)", viz.FAINT),
         )  # fmt: skip
+        wide = inner >= 84
         panels = [
-            self.loss_panel(min(50, inner - 51) if inner >= 84 else min(50, inner - 23)),
-            self.samples_panel(),
+            self.loss_panel(min(52, inner - 42) if wide else min(52, inner - 4)),
+            self.samples_panel(38 if wide else min(52, inner - 4)),
             self.gradient_panel(),
             self.probe_panel(),
-            self.weights_panel(),
-            self.nudge_panel(),
+            self.lens_panel(),
         ]
         rows = pack(panels, inner, gap=3)
         body = Group(progress, Text(""), *(r for row in rows for r in (row, Text(""))))
@@ -103,14 +99,13 @@ class Watch:
 
     def loss_panel(self, width: int) -> tuple[int, RenderableType]:
         tr, b = self.trainer, self.baselines
-        smoothed = smooth(tr.losses, 0.08)
+        smoothed = smooth(tr.losses, 0.05)
         lo = min([b.pairs, *smoothed, *(v for _, v in tr.val_losses)]) - 0.3
         lo = max(0.0, np.floor(lo * 2) / 2)
         hi = np.ceil((b.uniform + 0.05) * 2) / 2
-        plot_w = width - 6
-        plot = viz.Plot(plot_w, 8, x_max=tr.steps, lo=lo, hi=hi)
-        plot.guide(b.letters, viz.FAINT, "letter counts")
-        plot.guide(b.pairs, viz.FAINT, "letter pairs")
+        plot = viz.Plot(width - 6, 8, x_max=tr.steps, lo=lo, hi=hi)
+        plot.guide(b.tokens, viz.FAINT, "token counts")
+        plot.guide(b.pairs, viz.FAINT, "token pairs")
         if smoothed:
             plot.line(list(enumerate(smoothed, 1)), viz.ACCENT)
         if tr.val_losses:
@@ -123,87 +118,78 @@ class Watch:
         )  # fmt: skip
         return width, Group(Text("loss", style="bold"), *plot.render(fmt="{:.1f}"), legend)
 
-    def samples_panel(self) -> tuple[int, RenderableType]:
-        lines = [Text.assemble(("samples", "bold"), (f" at step {self.sample_step}", viz.FAINT))]
-        for word in self.samples[:6]:
-            new = word not in self.known
-            shown = display(word)
-            if len(shown) > 16:
-                shown = shown[:15] + "…"
-            lines.append(Text.assemble(
-                ("✦ " if new else "· ", viz.GREEN if new else viz.FAINT), (shown, "" if new else viz.FAINT),
-                ("" if new else " copy", viz.FAINT),
-            ))  # fmt: skip
-        lines += [Text("")] * (7 - len(lines))
-        lines.append(
-            Text.assemble(
-                ("✦ ", viz.GREEN),
-                ("new  ", viz.FAINT),
-                ("· ", viz.FAINT),
-                ("copied", viz.FAINT),
-            )
-        )
-        return 20, Group(*lines)
+    def samples_panel(self, width: int) -> tuple[int, RenderableType]:
+        tok = self.trainer.data.tokenizer
+        head = Text.assemble(("it writes", "bold"), (f" at step {self.sample_step}", viz.FAINT))
+        copied = self.memory.copied(self.sample) if self.sample else None
+        lines = running(tok, self.sample, width, copied)[:8]
+        lines += [Text("")] * (8 - len(lines))
+        key = Text.assemble(("▆ ", viz.RED), ("copied word for word", viz.FAINT))
+        return width, Group(head, *lines, key)
 
     def gradient_panel(self) -> tuple[int, RenderableType]:
-        lines = [Text("backprop's push", style="bold")]
-        norms = self.last.layer_norms() if self.last else dict.fromkeys(LAYERS, 0.0)
-        lines.append(Text("loss", style=viz.FAINT))
-        for layer in reversed(LAYERS):
-            n = norms[layer]
+        config = self.trainer.model.config
+        names = groups(config)
+        sizes = self.last.group_sizes(config) if self.last else dict.fromkeys(names, 0.0)
+        lines = [Text("backprop's push", style="bold"), Text("loss", style=viz.FAINT)]
+        for group in reversed(names):
+            n = sizes[group]
             length = max(0.0, 1 + np.log10(max(n, 1e-6)) / 3) if n else 0.0  # 0.001 … 1, log scale
-            lines.append(Text.assemble(("↓ ", viz.AMBER), (f"{LAYER_NAMES[layer]:<11}", ""),
+            lines.append(Text.assemble(("↓ ", viz.AMBER), (f"{group:<11}", ""),
                                        viz.bar(min(length, 1.0), 6, viz.AMBER), (f" {n:.3f}", viz.FAINT)))  # fmt: skip
-        lines.append(Text(""))
-        lines.append(Text("gradient size (log)", style=viz.FAINT))
+        size = self.last.size if self.last else 0.0
+        clipped = size > self.trainer.most
+        lines.append(Text.assemble(
+            ("whole gradient ", viz.FAINT), (f"{size:.2f}", f"bold {viz.RED if clipped else ''}"),
+            (" clipped" if clipped else "", viz.RED),
+        ))  # fmt: skip
         return 25, Group(*lines)
+
+    def probe_ids(self) -> list[int]:
+        return prompt(self.trainer.data.tokenizer, self.corpus.probe)
 
     def probe_panel(self) -> tuple[int, RenderableType]:
         tr = self.trainer
-        vocab = tr.data.vocab
-        ids = np.array([vocab.encode("." + self.corpus.probe)])
-        probs = softmax(tr.model.forward(ids).logits[0, -1])
-        lines = [
-            Text.assemble(
-                ("next after ", viz.FAINT),
-                (f".{self.corpus.probe}", f"bold {viz.ACCENT}"),
+        tok = tr.data.tokenizer
+        probs = tr.model.forward(np.array([self.probe_ids()])).probs[0, -1]
+        head = Text.assemble(
+            ("next after ", viz.FAINT), (self.corpus.probe.replace("\n", "↵"), f"bold {viz.ACCENT}")
+        )
+        return 24, Group(head, prob_bars(probs, tok, top=6, width=8))
+
+    def lens_panel(self) -> tuple[int, RenderableType]:
+        """What the model would guess at the end of the probe if it stopped after each layer."""
+        tr = self.trainer
+        tok = tr.data.tokenizer
+        model = tr.model
+        trace = model.forward(np.array([self.probe_ids()]))
+        lens = model.lens(trace)[:, 0, -1]  # (depths, vocab)
+        grid = Table.grid(padding=(0, 1))
+        grid.add_column(style=viz.FAINT, no_wrap=True)
+        grid.add_column(no_wrap=True)
+        grid.add_column(no_wrap=True, justify="right")
+        names = ["embeddings", *(f"after layer {i + 1}" for i in range(model.config.layers))]
+        for name, probs in zip(names, lens, strict=True):
+            best = int(np.argmax(probs))
+            grid.add_row(
+                name, chip(tok, best), Text(viz.percent(float(probs[best])), style=viz.FAINT)
             )
-        ]
-        for i in np.argsort(-probs)[:7]:
-            lines.append(Text.assemble(token_chip(vocab, int(i)), " ", viz.bar(float(probs[i]), 10, viz.ACCENT),
-                                       (f" {viz.percent(float(probs[i])):>5}", "")))  # fmt: skip
-        return 22, Group(*lines)
-
-    def weights_panel(self) -> tuple[int, RenderableType]:
-        table = self.trainer.model.params["embed.token"].T
-        lines = viz.signed_blocks(table, self.weight_scale)
-        letters = Text(self.trainer.data.vocab.chars, style=viz.FAINT, no_wrap=True)
-        return table.shape[1], Group(Text("token embeddings", style="bold"), *lines, letters)
-
-    def nudge_panel(self) -> tuple[int, RenderableType]:
-        vocab = self.trainer.data.vocab
-        if self.last is None:
-            moved = np.zeros((self.trainer.model.config.width, len(vocab)))
-        else:
-            moved = self.last.moved["embed.token"].T
-        lines = viz.nudge_blocks(moved)
-        letters = Text(vocab.chars, style=viz.FAINT, no_wrap=True)
-        return moved.shape[1], Group(Text("this step's nudge", style="bold"), *lines, letters)
+        return 30, Group(Text("each layer's best guess", style="bold"), grid)
 
     def caption(self) -> Text:
-        """What's going on, judged on the held-back words so memorizing doesn't count."""
+        """What's going on, judged on the held-back text so memorizing doesn't count."""
         tr, b = self.trainer, self.baselines
         loss = tr.val_losses[-1][1] if tr.val_losses else b.uniform
         if tr.step_number == 0:
-            words = "Untrained: every letter is equally likely, so the samples are gibberish."
-        elif loss > b.letters + 0.1:
-            words = "Finding its feet: learning which letters turn up at all."
+            words = "Untrained: every token equally likely, so what it writes is gibberish."
+        elif loss > b.tokens + 0.1:
+            words = "Finding its feet: learning which tokens turn up at all."
         elif loss > b.pairs + 0.05:
-            words = "It knows which letters are common. Now: which letters follow which?"
-        elif loss > b.pairs - 0.1:
-            words = "About as good as a table of letter pairs. Can attention beat that?"
+            words = "It knows which tokens are common. Now: which tokens follow which?"
+        elif loss > b.pairs - 0.3:
+            words = "About as good as a table of token pairs. Can attention look further back?"
         else:
-            words = "Better than any letter-pair table: attention lets it look further back."
+            words = "Better than any table of token pairs: attention is putting the context to use."
         return Text.assemble(("  ", ""), ("◇ ", viz.ACCENT), (words, f"italic {viz.FAINT}"))
 
 
@@ -227,7 +213,7 @@ def pack(panels: list[tuple[int, RenderableType]], width: int, gap: int) -> list
     return tables
 
 
-FPS = 15
+FPS = 10
 
 
 def frames(
@@ -236,7 +222,8 @@ def frames(
     """Train to the end, a picture at a time, taking about `seconds` if drawing keeps up.
 
     Every picture is at least one step further on, and early steps get more screen time than
-    later ones: that's when the most happens. The first picture is the untrained model.
+    later ones: that's when the most happens. The first picture is the untrained model. When
+    the arithmetic takes longer than `seconds`, pictures come as fast as it allows.
     """
     tr = watch.trainer
     total = max(1, round(seconds * fps))
@@ -269,7 +256,7 @@ def run(
         if not hurry:
             update(picture)
             hurry = interrupted(min(pause, 1.5))
-        elif time.monotonic() - glimpsed > 0.1:
+        elif time.monotonic() - glimpsed > 0.25:
             update(picture)
             glimpsed = time.monotonic()
     update(watch.render(width))

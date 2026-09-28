@@ -57,23 +57,43 @@ def run(stage: Stage, lab: Lab) -> None:
     )
     stage.wait("take one real step")
 
+    trainer = lab.trainer
     stage.say(
-        f"Now for real. Take 32 {lab.corpus.plural}, run them forward, backpropagate, and move "
-        "every weight in your model one step downhill (learning rate 1). Here's the token "
-        "embedding table before the step, the step itself, and after:"
+        f"Now for real. Take {trainer.batch_size} stretches of your {lab.corpus.plural}, "
+        f"{lab.model.config.context} tokens each, run them forward, backpropagate, and move "
+        "every weight in your model one step downhill. Here's a corner of one of its grids, "
+        "layer 1's queries, before the step, the step itself, and after:"
     )
     step = real_step(lab)
-    stage.show(step.picture(lab, stage.width))
+    stage.show(step.picture(stage.width))
     stage.say(
-        f"The loss on those {lab.corpus.plural} went from [b]{step.before:.2f}[/b] to "
-        f"[b][green]{step.after:.2f}[/green][/b]. One small step. Pretraining is this, "
-        "over and over."
+        f"The loss on those stretches went from [b]{step.before:.2f}[/b] to "
+        f"[b][green]{step.after:.2f}[/green][/b], with a learning rate of {step.lr:g}. One small "
+        "step. Pretraining is this, over and over."
     )
-    stage.note(
-        "Your model will actually train with Adam, a refinement of gradient descent that gives "
-        "each weight momentum (it keeps rolling the way it has been going) and its own step "
-        "size. Nearly every language model trains with it, or with AdamW, a variant you'll "
-        "meet a couple of chapters from now."
+    stage.wait("see the real recipe")
+
+    stage.say(
+        "Real training adds three refinements, and your model uses all of them. The first is "
+        "[b]Adam[/b]: instead of stepping straight down the gradient, each weight keeps "
+        "momentum (it keeps rolling the way it has been going, so one noisy batch can't knock "
+        "it off course) and its own step size (weights whose gradients are always tiny still "
+        "move). With weight decay, which you'll meet in the chapter on memorizing, it's "
+        "called [b]AdamW[/b], and nearly every language model trains with it."
+    )
+    stage.say(
+        "The second is a [b]schedule[/b] for the learning rate. It starts near zero and ramps "
+        f"up over the first {trainer.warmup} steps (the warmup: big steps from random weights "
+        "can do damage), then eases down along a cosine curve, so the last steps are small "
+        "and careful. Here's your model's:"
+    )
+    stage.show(schedule(lab, min(56, stage.width - 12)))
+    stage.say(
+        "The third is [b]gradient clipping[/b]. Now and then one unlucky batch produces a "
+        "huge gradient, and one huge step can undo a lot of work. So before each step, the "
+        "whole gradient, every weight's, is measured as one long vector, and if it's longer "
+        f"than {trainer.most:g} it's shrunk to that length. It still points the same way; it "
+        "just can't leap. You'll see its length on the training dashboard."
     )
 
 
@@ -173,40 +193,60 @@ def panel(pixels, path, cols: int, rows: int, lr: float, verdict: str, step: int
 class RealStep:
     before: float
     after: float
+    lr: float
     old: np.ndarray
     new: np.ndarray
 
-    def picture(self, lab: Lab, width: int) -> Table:
+    def picture(self, width: int) -> Group:
         scale = viz.scale_of(self.old)
         maps = [
-            ("before", viz.signed_blocks(self.old.T, scale)),
-            ("the step", viz.nudge_blocks((self.new - self.old).T)),
-            ("after", viz.signed_blocks(self.new.T, scale)),
+            ("before", viz.signed_blocks(self.old, scale, width=2)),
+            ("the step", viz.nudge_blocks(self.new - self.old, width=2)),
+            ("after", viz.signed_blocks(self.new, scale, width=2)),
         ]
-        letters = Text(lab.vocab.chars, style=viz.FAINT, no_wrap=True)
-        side_by_side = width >= 3 * len(lab.vocab) + 8
-        grid = Table.grid(padding=(0, 3))
-        if side_by_side:
-            for _ in maps:
-                grid.add_column(no_wrap=True)
-            grid.add_row(*(Text(name, style="bold") for name, _ in maps))
-            grid.add_row(*(Group(*lines, letters) for _, lines in maps))
-        else:
+        gap = max(1, min(3, (width - len(maps) * 2 * self.old.shape[1]) // (len(maps) - 1)))
+        grid = Table.grid(padding=(0, gap))
+        for _ in maps:
             grid.add_column(no_wrap=True)
-            for name, lines in maps:
-                grid.add_row(Group(Text(name, style="bold"), *lines, letters, Text("")))
-        return grid
+        grid.add_row(*(Text(name, style="bold") for name, _ in maps))
+        grid.add_row(*(Group(*lines) for _, lines in maps))
+        legend = Text.assemble(
+            viz.legend(viz.SIGNED, "−", "+"), ("     ", ""), viz.legend(viz.NUDGE, "down", "up")
+        )
+        corner = Text(f"a {len(self.old)} × {self.old.shape[1]} corner of it", style=viz.FAINT)
+        return Group(grid, corner, Text(""), legend)
 
 
-def real_step(lab: Lab, lr: float = 1.0) -> RealStep:
-    words = [lab.data.train[int(i)] for i in lab.rng.choice(len(lab.data.train), 32, replace=False)]
-    inputs, targets = lab.data.batch(words)
-    model = lab.model.copy()  # practice on a copy: the real training starts from scratch
-    tr = model.forward(inputs)
+def real_step(lab: Lab, corner: tuple[int, int] = (16, 12)) -> RealStep:
+    """One plain step of gradient descent, on a copy: the real training starts from scratch."""
+    inputs, targets = lab.data.windows(lab.rng, lab.trainer.batch_size, lab.model.config.context)
+    tr = lab.model.forward(inputs)
     before, dlogits = cross_entropy(tr.logits, targets)
-    grads, _ = model.backward(tr, dlogits)
-    old = model.params["embed.token"].copy()
-    for name, w in model.params.items():
-        w -= lr * grads[name]
-    after, _ = cross_entropy(model.forward(inputs).logits, targets)
-    return RealStep(before, after, old, model.params["embed.token"].copy())
+    grads, _ = lab.model.backward(tr, dlogits)
+    name = "layers.0.attn.query"
+    rows, cols = corner
+    for lr in (1.0, 0.5, 0.2, 0.1):  # the biggest step that still goes downhill
+        model = lab.model.copy()
+        for key, w in model.params.items():
+            w -= lr * grads[key]
+        after, _ = cross_entropy(model.forward(inputs).logits, targets)
+        if after < before:
+            break
+    old = lab.model.params[name][:rows, :cols].copy()
+    return RealStep(before, after, lr, old, model.params[name][:rows, :cols].copy())
+
+
+def schedule(lab: Lab, width: int) -> Group:
+    trainer = lab.trainer
+    saved = trainer.step_number
+    rates = []
+    for n in range(trainer.steps):
+        trainer.step_number = n
+        rates.append(trainer.learning_rate())
+    trainer.step_number = saved
+    plot = viz.Plot(width, 6, x_max=trainer.steps, lo=0.0, hi=trainer.lr * 1.05)
+    plot.line(list(enumerate(rates)), viz.AMBER)
+    axis = Text.assemble(
+        ("       step 0", viz.FAINT), (" " * (width - 14)), (f"{trainer.steps:,}", viz.FAINT)
+    )
+    return Group(Text("  learning rate", style=viz.FAINT), *plot.render(fmt="{:.3f}"), axis)

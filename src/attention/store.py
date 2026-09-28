@@ -4,16 +4,21 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import zipfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from functools import cached_property
 from pathlib import Path
 
 import numpy as np
 
-from .corpus import Corpus, Vocab
-from .generate import sample
-from .model import Config, Transformer
+from .corpus import SEPARATOR, Corpus, stream
+from .generate import Memory, write
+from .model import Array, Config, Transformer
+from .tokenizer import Tokenizer
+
+FORMAT = 2
 
 
 def home() -> Path:
@@ -30,19 +35,25 @@ def default_path() -> Path:
     return home() / "model.npz"
 
 
+def chat_path(path: Path) -> Path:
+    """Where the chat add-on for the model at `path` lives: right beside it."""
+    return path.with_name(path.stem + ".chat.npz")
+
+
 @dataclass(frozen=True, slots=True)
 class Card:
     """Everything about a trained model except its weights."""
 
     name: str
-    corpus: str  # "dinosaurs", or a file's name
+    corpus: str  # "fables", or a file's name
     title: str
     noun: str
+    plural: str
     seed: int
     steps: int
     loss: float
     val_loss: float
-    pair_loss: float  # what letter-pair statistics alone would score
+    pair_loss: float  # what counting token pairs alone would score
     trained_at: str
     probe: str
 
@@ -51,30 +62,43 @@ class Card:
         return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class Saved:
     model: Transformer
-    vocab: Vocab
+    tokenizer: Tokenizer
     card: Card
-    words: tuple[str, ...]  # what it trained on, to tell invented words from memorized ones
+    documents: tuple[str, ...]  # what it trained on, to tell what it invents from what it copies
 
-    @property
-    def known(self) -> set[str]:
-        return set(self.words)
+    @cached_property
+    def memory(self) -> Memory:
+        return Memory(stream(self.tokenizer, self.documents))
+
+
+class Outdated(ValueError):
+    """A model saved by an older version of attention, from before it read tokens."""
 
 
 def save(path: Path, saved: Saved) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
     meta = {
-        "format": 1,
+        "format": FORMAT,
         "config": asdict(saved.model.config),
-        "vocab": saved.vocab.chars,
+        "tokenizer": saved.tokenizer.to_json(),
         "card": asdict(saved.card),
-        "words": "\n".join(saved.words),
     }
-    arrays = {f"param/{k}": v for k, v in saved.model.params.items()}
+    text = f"\n{SEPARATOR}\n".join(saved.documents).encode("ascii")
+    return write_npz(
+        path,
+        meta=np.array(json.dumps(meta)),
+        text=np.frombuffer(text, dtype=np.uint8),
+        **{f"param/{k}": v for k, v in saved.model.params.items()},
+    )
+
+
+def write_npz(path: Path, **arrays: Array) -> Path:
+    """Write to a temporary file first, then swap it in, so a crash never leaves half a file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = unfinished(path)
-    np.savez_compressed(tmp, meta=np.array(json.dumps(meta)), **arrays)  # ty: ignore[invalid-argument-type]
+    np.savez_compressed(tmp, **arrays)  # ty: ignore[invalid-argument-type]
     tmp.replace(path)
     return path
 
@@ -85,16 +109,17 @@ def unfinished(path: Path) -> Path:
 
 
 def is_model(path: Path) -> bool:
-    """Is this a model attention saved? (It has attention's card inside.)"""
+    """Is this a file attention saved? (It has attention's card, or is a chat add-on.)"""
     try:
         with np.load(path, allow_pickle=False) as f:
-            return "meta" in f.files and "card" in json.loads(str(f["meta"]))
+            meta = json.loads(str(f["meta"]))
+            return "card" in meta or "adapter" in meta
     except (OSError, ValueError, KeyError, EOFError, zipfile.BadZipFile):
         return False
 
 
 def leftovers(extra: Path | None = None) -> list[Path]:
-    """Everything attention has saved: models and unfinished saves in its folder, and `extra`."""
+    """Everything attention has saved: models, add-ons and unfinished saves, and `extra`."""
     found: list[Path] = []
     folder = home()
     if folder.is_dir():
@@ -103,7 +128,9 @@ def leftovers(extra: Path | None = None) -> list[Path]:
             if p.is_file() and (p.name.endswith(".tmp.npz") or is_model(p))
         )  # fmt: skip
     if extra is not None:
-        found += [p for p in (extra, unfinished(extra)) if p.is_file() and p not in found]
+        for p in (extra, unfinished(extra), chat_path(extra)):
+            if p.is_file() and p not in found and (p != chat_path(extra) or is_model(p)):
+                found.append(p)
     return found
 
 
@@ -121,21 +148,29 @@ def remove(paths: list[Path]) -> bool:
 def load(path: Path) -> Saved:
     with np.load(path, allow_pickle=False) as f:
         meta = json.loads(str(f["meta"]))
+        if meta.get("format") != FORMAT:
+            raise Outdated(
+                "it was made by an older version of attention, which read letters, not tokens"
+            )
         params = {k.removeprefix("param/"): f[k] for k in f.files if k.startswith("param/")}
+        text = f["text"].tobytes().decode("ascii")
     model = Transformer(Config(**meta["config"]), params)
-    words = tuple(w for w in meta["words"].split("\n") if w)
-    return Saved(model, Vocab(meta["vocab"]), Card(**meta["card"]), words)
+    documents = tuple(text.split(f"\n{SEPARATOR}\n"))
+    tokenizer = Tokenizer.from_json(meta["tokenizer"])
+    return Saved(model, tokenizer, Card(**meta["card"]), documents)
 
 
-def pick_name(model: Transformer, vocab: Vocab, rng: np.random.Generator, corpus: Corpus) -> str:
-    """Let the model name itself: the first new word it invents that's a nice length."""
-    known = set(corpus.words)
+def pick_name(
+    model: Transformer, tokenizer: Tokenizer, rng: np.random.Generator, corpus: Corpus
+) -> str:
+    """Let the model name itself: the first name it invents that appears nowhere in its text."""
+    known = {w.lower() for d in corpus.documents for w in re.findall(r"[A-Za-z]+", d)}
     fallback = ""
-    for _ in range(300):
-        word = sample(model, vocab, rng, temperature=0.6)
-        tidy = not any(a == b == c for a, b, c in zip(word, word[1:], word[2:], strict=False))
-        if 4 <= len(word) <= 10 and word not in known and tidy:
-            return word.capitalize()
-        if word and not fallback:
-            fallback = word
-    return (fallback or corpus.example).capitalize()
+    for _ in range(60):
+        for word in re.findall(
+            r"\b[A-Z][a-z]{3,9}\b", write(model, tokenizer, rng, "", 0.8, limit=48)
+        ):
+            if word.lower() not in known:
+                return word
+            fallback = fallback or word
+    return fallback or corpus.title.split()[0]
