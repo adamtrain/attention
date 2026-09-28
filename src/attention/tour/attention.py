@@ -51,8 +51,8 @@ def run(stage: Stage, lab: Lab) -> None:
     stage.console.print()
     stage.show(roles())
     stage.say(
-        "Here it is with made-up numbers, two per vector. One position asks a question (its "
-        "query); three earlier positions each have a key and a value:"
+        "Here it is with made-up numbers, two per vector. The position doing the looking asks "
+        "a question (its query); three earlier positions each have a key and a value:"
     )
     stage.play(toy, fps=1, start="look it up")
     stage.say(

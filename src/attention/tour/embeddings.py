@@ -67,6 +67,39 @@ def run(stage: Stage, lab: Lab) -> None:
         f"{t} × {width}."
     )
     stage.show(stream_shape(lab, tr.blocks[0].x[0], ids, scale, stage.width))
+    twice = repeated(lab, inputs)
+    example = (
+        f"In your example, `{twice[0]}` is at position {twice[1]} and again at position "
+        f"{twice[2]}: the two start out identical, but from the first layer on, each takes in "
+        "different things from the tokens before it."
+        if twice
+        else "When a token turns up twice, the two positions start out identical, but from the "
+        "first layer on, each takes in different things from the tokens before it."
+    )
+    stage.say(
+        "Each row of that grid is a [b]position[/b]: one slot in the text, numbered from the "
+        "start, holding one token's vector. You'll meet that word constantly from here on, and "
+        "it isn't just another name for the token or its embedding. The embedding is the "
+        "token's row in the table, the same wherever the token turns up. A position's vector "
+        "[i]starts[/i] as a copy of it, and then every layer adds to it. "
+        + example
+        + " So when the tour says a position “asks”, “looks back” or “is looked at”, it means "
+        "the vector in that slot, as it stands in that layer."
+    )
+
+
+def repeated(lab: Lab, inputs: np.ndarray) -> tuple[str, int, int] | None:
+    """A whole word that turns up twice in the example, and its two positions, counting from 1."""
+    tok = lab.tokenizer
+    seen: dict[int, int] = {}
+    for i, token in enumerate(int(t) for t in inputs[0, 1:]):
+        piece = tok.pieces[token]
+        if not (piece.startswith(" ") and piece[1:].isalpha() and len(piece) > 3):
+            continue
+        if token in seen:
+            return label(tok, token), seen[token] + 1, i + 1
+        seen[token] = i
+    return None
 
 
 def rows(lab: Lab, ids: list[int], scale: float, width: int) -> Table:
