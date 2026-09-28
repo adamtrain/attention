@@ -184,7 +184,8 @@ def main() -> None:
     rng = np.random.default_rng(11)
 
     def measure(model) -> float:
-        return share(samples(model, lab.tokenizer, rng, 24, temperature=0.8, limit=48), niche)
+        texts = samples(model, lab.tokenizer, rng, finetuning.MEASURE, temperature=0.8, limit=48)
+        return share(texts, niche)
 
     con = terminal(88)
     stage = Stage(con, animate=False)

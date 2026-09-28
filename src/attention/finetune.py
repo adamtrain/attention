@@ -55,7 +55,7 @@ def share(texts: Sequence[str], niche: Niche) -> float:
 
 # ── LoRA ──────────────────────────────────────────────────────────────────────
 
-RANK = 4
+RANK = 8  # at 4, on some models it learned the niche far less well than full fine-tuning
 TARGETS = ("attn.query", "attn.key", "attn.value", "attn.out", "mlp.gate", "mlp.up", "mlp.down")
 
 
@@ -64,7 +64,7 @@ class LoRA:
     """Low-rank adaptation: freeze the model, and learn a small correction to each grid.
 
     For a grid W with m rows and n columns, LoRA learns two thin grids, A (m × r) and B (r × n),
-    and uses W + A @ B in W's place. With r = 4, that's 4 × (m + n) numbers instead of m × n.
+    and uses W + A @ B in W's place. With r = 8, that's 8 × (m + n) numbers instead of m × n.
     B starts at zero, so to begin with the model is exactly the one it started from.
     """
 

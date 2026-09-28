@@ -29,14 +29,15 @@ from .stage import Frame, Stage
 
 LORA_RATE = 0.003
 SAMPLES = 6
-MEASURE = 24  # samples to measure the share with
+MEASURE = 48  # samples to measure the share with: fewer, and luck moves it a lot
 FPS = 8
 
 
 def run(stage: Stage, lab: Lab) -> None:
     c, data = lab.corpus, lab.data
     niche = c.niche
-    docs = narrow(data, niche).train_docs
+    narrowed = narrow(data, niche)  # the niche's documents, tokenized once
+    docs = narrowed.train_docs
     stage.say(
         f"Pretraining gave you a model that writes any kind of {c.noun}. [b]Fine-tuning[/b] is "
         f"how you get one that does something more particular. Say you only want {niche.label}. "
@@ -113,7 +114,7 @@ def run(stage: Stage, lab: Lab) -> None:
     )
     stage.show(lora_shapes(m, n))
     tuner = AdapterTrainer(
-        lora, lambda r: narrow(data, niche).windows(r, 16, lab.model.config.context), lab.dice(17),
+        lora, lambda r: narrowed.windows(r, 16, lab.model.config.context), lab.dice(17),
         steps=lab.budget.tuning, lr=LORA_RATE,
     )  # fmt: skip
 
@@ -122,7 +123,7 @@ def run(stage: Stage, lab: Lab) -> None:
         if tuner.step_number:
             lora = LoRA.create(lab.model, lab.dice(16))
             tuner = AdapterTrainer(
-                lora, lambda r: narrow(data, niche).windows(r, 16, lab.model.config.context),
+                lora, lambda r: narrowed.windows(r, 16, lab.model.config.context),
                 lab.dice(17), steps=lab.budget.tuning, lr=LORA_RATE,
             )  # fmt: skip
         return training(lab, tuner, before, limit, f"LoRA, rank {RANK}")
@@ -136,17 +137,23 @@ def run(stage: Stage, lab: Lab) -> None:
     stage.show(
         comparison(lab, trainer.model, merged, lora, after, lora_share, general_after, lora_loss)
     )
-    better = (
-        "as well or better, and forgot less"
-        if lora_share >= after - 0.1 and lora_loss < general_after
-        else "nearly as well"
-    )
+    close, behind = lora_share >= after - 0.05, lora_share < after - 0.15  # 48 samples: ±5 or so
+    verdict = "as well or better" if close else "less well" if behind else "nearly as well"
+    if lora_loss < general_after:
+        verdict += ", but forgot less" if behind else ", and forgot less"
     stage.say(
-        f"LoRA learned {lora.size:,} numbers instead of {lab.model.size:,}, and did {better}: a "
-        "correction built from thin grids can only change the model in a few directions, which "
-        "keeps it from wandering far. On your small model, rank 4 is a fair slice of each grid; "
-        "on a big one it's a sliver. Llama 3 8B with rank-16 LoRA on every grid learns about "
-        "0.5% as many numbers as the model has."
+        f"LoRA learned {lora.size:,} numbers instead of {lab.model.size:,}, and did {verdict}"
+        + ": a correction built from thin grids can only change the model in a few directions, "
+        "which keeps it from wandering far."
+        + (
+            " It can't touch the embedding table either, which full fine-tuning changed directly."
+            if behind
+            else ""
+        )
+        + f" On your small model, rank {RANK} is a fair slice of each grid; on a big one it's a "
+        "sliver. "
+        "Llama 3 8B with rank-16 LoRA on every grid learns about 0.5% as many numbers as the "
+        "model has."
     )
     stage.note(
         "And the correction is its own small file. One base model can have many LoRA adapters "

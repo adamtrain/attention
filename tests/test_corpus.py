@@ -6,6 +6,7 @@ from attention.corpus import (
     SEPARATOR,
     VOCAB,
     Dataset,
+    Niche,
     built_in,
     common_topic,
     documents,
@@ -80,6 +81,13 @@ def test_your_own_text_files(tmp_path):
         from_file(tmp_path / "few.txt")
     with pytest.raises(ValueError, match="No corpus"):
         load("nonexistent-corpus")
+
+
+def test_a_niche_can_look_at_just_the_title_or_the_opening():
+    assert Niche(r"\bFox\b", "foxes", titles=True).has("The Fox\n\nA Crow")
+    assert not Niche(r"\bCrow\b", "crows", titles=True).has("The Fox\n\nA Crow")
+    assert Niche(r"\bCrow\b", "crows", opening=20).has("The Fox\n\nA Crow")
+    assert not Niche(r"\bCrow\b", "crows", opening=5).has("The Fox\n\nA Crow")
 
 
 def test_custom_text_gets_a_niche():

@@ -138,7 +138,7 @@ start one of its fables for it, and it recites the rest.
 by learning small corrections to a frozen model, and forgets less along the way.
 
 <p align="center">
-  <img src="docs/finetuning.svg" width="760" alt="Chapter 18, Fine-tuning. A table comparing full fine-tuning with rank-4 LoRA, both teaching the model fables about the Wolf: 328,256 numbers learned against 19,456; 92% of what full fine-tuning writes is about the Wolf, against 83% for LoRA; they moved the weights by 21% and 14%; the held-back loss is 5.51 against 4.48; and the file to keep is 641 KB against 38 KB.">
+  <img src="docs/finetuning.svg" width="760" alt="Chapter 18, Fine-tuning. A table comparing full fine-tuning with rank-8 LoRA, both teaching the model fables about the Wolf: 328,256 numbers learned against 38,912; 92% of what full fine-tuning writes is about the Wolf, against 98% for LoRA; they moved the weights by 21% and 18%; the held-back loss is 5.51 against 4.61; and the file to keep is 641 KB against 76 KB.">
 </p>
 
 ### A note on backprop at inference

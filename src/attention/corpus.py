@@ -25,9 +25,10 @@ class Niche:
     pattern: str  # a regular expression that finds the thing
     label: str  # "fables about the Wolf"
     titles: bool = False  # look only at a document's first line
+    opening: int = 0  # look only at this many characters from the start (0: the whole thing)
 
     def has(self, text: str) -> bool:
-        where = text.split("\n", 1)[0] if self.titles else text
+        where = text.split("\n", 1)[0] if self.titles else text[: self.opening or None]
         return re.search(self.pattern, where, re.M) is not None
 
 
@@ -74,7 +75,10 @@ BUILT_IN: dict[str, dict] = {
         "example": "Hansel and Grethel\n\nHard by a great forest dwelt a poor wood-cutter with "
                    "his wife and his two children. The boy was called Hansel and the girl Grethel.",
         "probe": "There was once a",
-        "niche": Niche(r"\b[Pp]rincess", "tales with a princess in them"),
+        # In the opening, where the short samples the tour measures can show it. (Tales with a
+        # princess make a poor niche: she's usually thousands of characters in.)
+        "niche": Niche(r"\b([Ff]ox|[Ww]olf|[Cc]at|[Mm]ouse|[Dd]og|[Cc]ock|[Hh]en|[Ff]rog)\b",
+                       "tales about animals", opening=400),
         "titled": True,
     },
     "shakespeare": {
