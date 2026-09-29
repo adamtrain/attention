@@ -20,7 +20,7 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
-from . import __version__, dashboard, tour, viz
+from . import __version__, dashboard, longhand, tour, viz
 from . import corpus as corpora
 from .corpus import Dataset
 from .explain import influence, nudge
@@ -42,7 +42,7 @@ from .store import (
 )
 from .tour.lab import Lab
 from .tour.pretraining import summary, tidy
-from .tour.stage import THEME, Stage
+from .tour.stage import THEME, Quit, Stage
 from .views import chip, influence_view, label, looking, nudge_view, running
 
 out = Console(highlight=False, theme=THEME)
@@ -557,6 +557,38 @@ def lens_row(saved: Saved, lens: np.ndarray) -> Table:
         )
     )
     return grid
+
+
+@app.command("math")
+def longhand_math(
+    text: Annotated[
+        str, typer.Argument(help="What the little model reads: words from fable titles.")
+    ] = "The Fox and the",
+    seed: Annotated[
+        int, typer.Option("--seed", "-s", help="Train the little model differently.")
+    ] = 1,
+    auto: Annotated[
+        bool, typer.Option("--auto", help="Play by itself, without waiting for keys.")
+    ] = False,
+    fast: Annotated[bool, typer.Option("--fast", help="Speed up the animations.")] = False,
+) -> None:
+    """Watch every operation of the forward pass, on a model small enough to print."""
+    interactive = Keys.available() and not auto
+    autopilot = auto or (out.is_terminal and not interactive)
+    stage = Stage(
+        out, animate=out.is_terminal, auto=3.5 if autopilot else None, speed=2.5 if fast else 1.0
+    )
+    try:
+        if interactive:
+            with Keys() as keys:
+                stage.keys = keys
+                longhand.run(stage, text, seed)
+        else:
+            longhand.run(stage, text, seed)
+    except ValueError as e:
+        raise fail(str(e)[0].upper() + str(e)[1:] + ".") from e
+    except (Quit, KeyboardInterrupt):
+        out.print("\n[faint]Stopped.[/]")
 
 
 @app.command()

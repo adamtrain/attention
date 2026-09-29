@@ -30,6 +30,17 @@ def test_commands_need_a_model_first():
         assert "no model" in plain(result.output).lower()
 
 
+def test_math_walks_through_the_little_model():
+    result = runner.invoke(app, ["math", "The Wolf and the"])
+    assert result.exit_code == 0, result.output
+    out = plain(result.output)
+    assert "Layer 2 · mask and softmax" in out and "The next word" in out
+
+    result = runner.invoke(app, ["math", "The Unicorn"])
+    assert result.exit_code == 1
+    assert "doesn't know “Unicorn”" in plain(result.output)
+
+
 def test_train_then_use_the_model():
     result = runner.invoke(app, TRAIN)
     assert result.exit_code == 0, result.output

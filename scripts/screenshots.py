@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import io
 import tempfile
+from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +21,7 @@ from rich.padding import Padding
 from rich.terminal_theme import TerminalTheme
 from rich.text import Text
 
-from attention import tour, viz
+from attention import longhand, tour, viz
 from attention.cli import show_explain
 from attention.corpus import built_in
 from attention.dashboard import Watch
@@ -94,6 +96,38 @@ def last(frames):
     return frame[0] if isinstance(frame, tuple) else frame
 
 
+class Snapped(Exception):
+    """The picture has been taken."""
+
+
+@dataclass
+class Snapshot(Stage):
+    """Draws only the step called `title`, and its first animation stopped at frame `frame`."""
+
+    title: str = ""
+    frame: int = 0
+    drawing: bool = False
+
+    def header(self, number: int, total: int, title: str, subtitle: str) -> None:
+        self.drawing = title == self.title
+        if self.drawing:
+            super().header(number, total, title, subtitle)
+
+    def say(self, text: str, gap: bool = True) -> None:
+        if self.drawing:
+            super().say(text, gap)
+
+    def show(self, *items, gap: bool = True) -> None:
+        if self.drawing:
+            super().show(*items, gap=gap)
+
+    def play(self, frames, *args, **kwargs) -> None:
+        if self.drawing:
+            picture = list(frames())[self.frame]
+            self.show(picture[0] if isinstance(picture, tuple) else picture)
+            raise Snapped
+
+
 def save(console: Console, name: str, title: str) -> None:
     console.save_svg(str(DOCS / f"{name}.svg"), title=title, theme=THEME)
     print(f"wrote docs/{name}.svg")
@@ -103,6 +137,13 @@ def main() -> None:
     DOCS.mkdir(exist_ok=True)
     home = Path(tempfile.mkdtemp())
     lab = Lab.create(built_in("fables"), SEED, home / "model.npz")
+
+    # attention math: the little model's attention scores, worked out one row at a time.
+    con = terminal(88)
+    prompt_line(con, "attention math")
+    with suppress(Snapped):
+        longhand.run(Snapshot(con, animate=False, title="Layer 1 · scores", frame=7))
+    save(con, "math", "attention math")
 
     # Attention, from the tour: the lookup with made-up numbers, then the three jobs.
     con = terminal(88)

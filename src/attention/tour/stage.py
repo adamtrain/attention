@@ -123,9 +123,9 @@ class Stage:
             Text.assemble((f"{number:02d}  ", f"bold {viz.ACCENT}"), (title, "bold")),
             dots,
         )
-        grid.add_row(Text.assemble(("    ", ""), (subtitle, f"italic {viz.FAINT}")), "")
+        below = Padding(Text(subtitle, style=f"italic {viz.FAINT}"), (0, 0, 0, 4))  # full width
         self.console.print()
-        self.show(grid, gap=False)
+        self.show(Group(grid, below), gap=False)
         self.show(Text("─" * self.width, style=viz.FAINT))
 
     # ── Time ──────────────────────────────────────────────────────────────────

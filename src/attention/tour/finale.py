@@ -58,6 +58,7 @@ def commands(lab: Lab) -> Table:
     grid.add_row("attention chat", "talk to the chat version")
     grid.add_row(f'attention explain "{probe}"', "one prediction up close, layer by layer")
     grid.add_row('attention tokenize "any text"', "see how your tokenizer splits it")
+    grid.add_row("attention math", "the whole forward pass, number by number")
     grid.add_row("attention info", "everything about your model, and its config.json")
     grid.add_row("attention train", "train a new one (try --corpus shakespeare)")
     grid.add_row("attention tour", "take the tour again")

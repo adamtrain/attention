@@ -150,6 +150,27 @@ prediction down to the tokens that went in shows which of them swayed it. And it
 one step of learning *would* do if you insisted on a different answer, on a throwaway copy of
 the model. Fine-tuning, LoRA, chat and feedback are where backprop runs for real again.
 
+## Every number, by hand
+
+`attention math` is the whole forward pass in longhand, on a model small enough to print: the
+same architecture as yours, shrunk to 8 numbers per token, 2 layers, 2 query heads sharing 1
+key/value head, an MLP 12 wide, and a vocabulary of 12 whole words. It trains for about a
+second on fable titles like *The Fox and the Crow*, then reads one while you watch every
+operation happen to real numbers: the embedding lookup, RMSNorm, every product and sum of
+every matrix multiply, RoPE turning each pair, the scores, the mask and softmax, the blend of
+values, the residual adds, SwiGLU's switch, and the scores for every word. What's being read
+is lit up in purple and what's being written in green, and at the end its longhand answer
+matches the model's own forward pass exactly.
+
+```sh
+attention math                      # reads “The Fox and the”
+attention math "The Wolf and the"   # or any of its words: the, and, Fox, Wolf, Lion, Eagle, Ass, Crow, Cat, Dog
+```
+
+<p align="center">
+  <img src="docs/math.svg" width="760" alt="attention math, step 7 of 33, Layer 1 · scores: S = Q · Kᵀ ÷ √4. Head 1's queries Q1 and the shared keys K1, 5 × 4 each, with the row for ·and lit up in Q1 and the row for ·the lit up in K1. Below, the two rows multiplied pair by pair and added up, −8.529, ÷ √4 = −4.265, written in green into the scores S1, a 5 × 5 grid with a row for each token that's looking and a column for each token it looks at. Its first four rows are filled in; the last, for ·the, is still to come.">
+</p>
+
 ## Your model
 
 Your model is saved when training ends, and it names itself after a name it made up. From
@@ -185,16 +206,17 @@ from its training text; the rest it made up.
 | `attention chat` | Talk to the chat version of your model (made the first time, if the tour didn't) |
 | `attention explain TEXT` | Watch one prediction up close |
 | `attention tokenize TEXT` | See how your model's tokenizer splits some text |
+| `attention math [TEXT]` | Watch every operation of the forward pass, on a model small enough to print |
 | `attention info` | Your model's vital statistics, config.json and weights |
 | `attention clean` | Delete everything attention has saved |
 
 | Option | |
 | --- | --- |
 | `-c, --corpus NAME` | `fables`, `fairytales`, `shakespeare`, or a text file (`tour`, `train`) |
-| `-s, --seed N` | Make a particular model again (`tour`, `train`) |
+| `-s, --seed N` | Make a particular model again (`tour`, `train`); train the little one differently (`math`) |
 | `--chapter N` | Start the tour at chapter N; it trains a model first if it needs one, or picks up your saved one if it's the same corpus and seed |
-| `--auto` | Let the tour play by itself |
-| `--fast` | Speed up the animations (`tour`), or skip the drawing entirely (`train`) |
+| `--auto` | Let the tour, or `math`, play by itself |
+| `--fast` | Speed up the animations (`tour`, `math`), or skip the drawing entirely (`train`) |
 | `--steps N` | Training steps (`train`; the default is enough to read the text about 16 times) |
 | `-n, --count N` / `--tokens N` | How many to write, and how long each can be (`generate`) |
 | `-t, --temperature T` | How adventurous (`generate`, `chat`) |
@@ -301,6 +323,7 @@ src/attention/
 ├── quantize.py   # rounding weights to fewer bits
 ├── finetune.py   # fine-tuning, LoRA, chat templates and loss masks, feedback
 ├── explain.py    # backprop after training: which tokens mattered, and one-step nudges
+├── longhand.py   # attention math: the forward pass one operation at a time, on a tiny model
 ├── scalar.py     # a tiny autograd for single numbers (the tour's neuron)
 ├── store.py      # saving and loading models
 ├── dashboard.py  # the live training view
