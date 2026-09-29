@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Iterator
+from itertools import accumulate
 
 from rich.console import Group
 from rich.table import Table
@@ -43,11 +44,11 @@ def run(stage: Stage, lab: Lab) -> None:
         f"syllables, then whole words. Here it is, running on your {c.plural}:"
     )
     stage.play(lambda: merging(lab, stage.width), fps=4, start="watch it merge")
-    learned = len(tok.merges)
     stage.say(
-        f"…and so on, {learned} times, until your vocabulary had {len(tok)} tokens. That's "
-        "your model's [b]tokenizer[/b]: it was trained once, before the model, and from now on "
-        "every piece of text goes through it, in and out. Here's what it knows:"
+        f"{len(tok.merges):,} merges later, the vocabulary has {len(tok):,} tokens. The later "
+        "merges are rarer pairs, so each saves less than the one before. That's your model's "
+        "[b]tokenizer[/b]: it was trained once, before the model, and from now on every piece "
+        "of text goes through it, in and out. Here's what it knows:"
     )
     stage.show(vocabulary(lab, stage.width))
     stage.wait()
@@ -123,21 +124,25 @@ def sample(lab: Lab, width: int, most: int = 9) -> Group:
 
 
 def merging(lab: Lab, width: int) -> Iterator[Frame]:
-    """Byte-pair encoding, one merge at a time: on the example, and on the whole text."""
+    """Byte-pair encoding, one merge at a time, on the example, all the way to the last merge.
+
+    The first merges go slowly enough to follow; then faster and faster, several to a frame.
+    """
     tok = lab.tokenizer
     merges = tok.merges
-    text = lab.corpus.example
-    pieces = [list(ch) for ch in chunks(text)]
+    pieces = [list(ch) for ch in chunks(lab.corpus.example)]
     counts = Counter(chunks("\n\n".join(lab.data.train_docs)))
-    words = {w: list(w) for w in counts}
-    chars = sum(len(w) * n for w, n in counts.items())
+    chars = sum(len(w) * n for w, n in counts.items())  # tokens before any merge, one a letter
+    joined = [0, *accumulate(m.count for m in merges)]  # each merge makes that many pairs one
     start = len(SPECIAL) + len(ALPHABET)
+    digits = len(f"{len(merges):,}")
 
-    def frame(done: int, flat: list[str]) -> Group:
+    def frame(done: int) -> Group:
         latest = merges[done - 1] if done else None
         head = Text.assemble(
-            ("merge ", viz.FAINT), (f"{done:>3}", "bold"), (f" of {len(merges)}   ", viz.FAINT)
-        )
+            ("merge ", viz.FAINT), (f"{done:>{digits},}", "bold"),
+            (f" of {len(merges):,}   ", viz.FAINT),
+        )  # fmt: skip
         if latest:
             head.append_text(piece(latest.left, tok))
             head.append(" + ", style=viz.FAINT)
@@ -145,26 +150,24 @@ def merging(lab: Lab, width: int) -> Iterator[Frame]:
             head.append(" → ", style=viz.FAINT)
             head.append_text(piece(latest.token, tok))
             head.append(f"   seen {latest.count:,} times", style=viz.FAINT)
+        flat = [p for chunk in pieces for p in chunk]
         shown = tiles(tok, [tok.ids[p] for p in flat], width, numbers=False)
-        total = sum(len(words[w]) * n for w, n in counts.items())
         stats = Text.assemble(
-            ("vocabulary ", viz.FAINT), (f"{start + done}", "bold"), (" tokens", viz.FAINT),
-            ("     characters per token ", viz.FAINT), (f"{chars / total:.2f}", "bold"),
+            ("vocabulary ", viz.FAINT), (f"{start + done:,}", "bold"), (" tokens", viz.FAINT),
+            ("     characters per token ", viz.FAINT),
+            (f"{chars / (chars - joined[done]):.2f}", "bold"),
         )  # fmt: skip
         return Group(head, Text(""), *shown, Text(""), stats)
 
-    yield frame(0, [p for chunk in pieces for p in chunk])
-    for done, m in enumerate(merges[:SHOWN], 1):
-        pieces = [merge_pair(p, m.left, m.right) if m.left in p else p for p in pieces]
-        for w, p in words.items():
-            if m.left in p and m.right in p:
-                words[w] = merge_pair(p, m.left, m.right)
-        yield frame(done, [p for chunk in pieces for p in chunk]), 0.5 if done <= 8 else 0.2
-    for m in merges[SHOWN:]:
-        for w, p in words.items():
-            if m.left in p and m.right in p:
-                words[w] = merge_pair(p, m.left, m.right)
-    yield hold(frame(len(merges), tok.split(text)), 0.5)
+    yield frame(0)
+    done = 0
+    while done < len(merges):
+        step = 1 if done < SHOWN else done // SHOWN  # speeding up, more merges to a frame
+        for m in merges[done : done + step]:
+            pieces = [merge_pair(p, m.left, m.right) if m.left in p else p for p in pieces]
+        done = min(done + step, len(merges))
+        seconds = 0.5 if done <= 8 else 0.2 if done <= SHOWN else 0.04
+        yield frame(done), (seconds if done < len(merges) else 1.0)
 
 
 def piece(text: str, tok) -> Text:
