@@ -80,8 +80,11 @@ class Stage:
 
     # ── Output ────────────────────────────────────────────────────────────────
 
-    def pad(self, renderable: RenderableType) -> Padding:
-        return Padding(renderable, (0, 0, 0, MARGIN))
+    def pad(self, renderable: RenderableType, *, live: bool = False) -> Padding:
+        """Indented by the margin. A live picture isn't padded out to the full width with
+        spaces: then if the terminal narrows while it's up, its lines don't wrap, and it still
+        redraws in place instead of leaving copies of itself behind."""
+        return Padding(renderable, (0, 0, 0, MARGIN), expand=not live)
 
     def show(self, *items: RenderableType | list[Text], gap: bool = True) -> None:
         for item in items:
@@ -173,7 +176,10 @@ class Stage:
         if not self.patient:
             return None
         with Live(
-            self.pad(self.prompt(hint)), console=self.console, auto_refresh=False, transient=True
+            self.pad(self.prompt(hint), live=True),
+            console=self.console,
+            auto_refresh=False,
+            transient=True,
         ):
             return self._await()
 
@@ -187,9 +193,11 @@ class Stage:
         """
         key = None
         if self.patient:
-            live.update(self.pad(Group(frame, Text(""), self.prompt(hint, again))), refresh=True)
+            live.update(
+                self.pad(Group(frame, Text(""), self.prompt(hint, again)), live=True), refresh=True
+            )
             key = self._await()
-        live.update(self.pad(frame), refresh=True)
+        live.update(self.pad(frame, live=True), refresh=True)
         return key
 
     def sleep(self, seconds: float) -> bool:
@@ -228,7 +236,7 @@ class Stage:
             ):
                 last, replay = self._run(live, frames(), fps, None, AGAIN)
             if last is not None:
-                live.update(self.pad(last), refresh=True)
+                live.update(self.pad(last, live=True), refresh=True)
         self.console.print()
 
     def _run(
@@ -253,7 +261,7 @@ class Stage:
                 seconds = max(seconds, first)
             if skipping:
                 if time.monotonic() - glimpsed >= GLIMPSE:
-                    live.update(self.pad(last), refresh=True)
+                    live.update(self.pad(last, live=True), refresh=True)
                     glimpsed = time.monotonic()
                 continue
             if controls is None:
@@ -299,11 +307,11 @@ class Stage:
 
     def _draw(self, live: Live, frame: RenderableType, controls: bool, paused: bool) -> None:
         shown = Group(frame, Text(""), self.controls(paused)) if controls else frame
-        live.update(self.pad(shown), refresh=True)
+        live.update(self.pad(shown, live=True), refresh=True)
 
     def _fits(self, frame: RenderableType, extra: int) -> bool:
         """Is there room under this frame for `extra` more lines?"""
-        lines = self.console.render_lines(self.pad(frame), pad=False)
+        lines = self.console.render_lines(self.pad(frame, live=True), pad=False)
         return len(lines) + extra < self.height
 
     @contextmanager
@@ -326,7 +334,7 @@ class Stage:
             return None
         text = ""
         while True:
-            live.update(self.pad(show(text)), refresh=True)
+            live.update(self.pad(show(text), live=True), refresh=True)
             key = self.keys.read(None, typing=True)
             if key in ("escape", "right"):
                 return None

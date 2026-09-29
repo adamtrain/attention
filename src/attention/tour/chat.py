@@ -279,7 +279,7 @@ def conversation(stage: Stage, lab: Lab, chat: Transformer, example: str) -> Non
     with stage.live() as live:
         while (request := stage.line(live, picture)) is not None:
             history.append((request, answer(chat, lab.tokenizer, request, rng, 0.5, 60)))
-        live.update(stage.pad(picture("")), refresh=True)
+        live.update(stage.pad(picture(""), live=True), refresh=True)
 
 
 # ── Feedback ──────────────────────────────────────────────────────────────────
@@ -320,7 +320,9 @@ def rounds(stage: Stage, lab: Lab, chat: Transformer, request: str, most: int = 
         liked: set[str] = set()
         with stage.live() as live:
             while True:
-                live.update(stage.pad(choosing(request, options, liked, number)), refresh=True)
+                live.update(
+                    stage.pad(choosing(request, options, liked, number), live=True), refresh=True
+                )
                 key = stage.key()
                 if key and key.isdigit() and 1 <= int(key) <= len(options):
                     liked ^= {options[int(key) - 1]}

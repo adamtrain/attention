@@ -114,6 +114,16 @@ def test_right_at_the_start_prompt_skips_the_animation():
     assert len(keys.waits) == 1
 
 
+def test_live_pictures_are_not_padded_out_to_the_full_width():
+    stage = Stage(recording(100))
+
+    def line(picture) -> str:
+        return "".join(s.text for s in stage.console.render_lines(picture, pad=False)[0])
+
+    assert line(stage.pad(Text("hi"))) == "  hi".ljust(100)
+    assert line(stage.pad(Text("hi"), live=True)) == "  hi"  # if the terminal narrows, no wrap
+
+
 def test_the_controls_show_while_it_plays():
     stage = Stage(recording(), keys=FakeKeys())  # ty: ignore[invalid-argument-type]
     stage.play(frames, fps=1000, start=None, then=None)

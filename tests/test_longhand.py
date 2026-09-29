@@ -42,19 +42,24 @@ def test_words_are_whole_tokens(little):
 class EveryFrame(Measuring):
     """A stage that checks every frame of every animation, not only the last."""
 
+    tallest: int = 0
+
     def play(self, frames, *args, **kwargs) -> None:
         for frame in frames():
             picture = frame[0] if isinstance(frame, tuple) else frame
             if loses_ink(self.console, picture, self.width):
                 self.cut.append(f"{self.chapter}: a frame")
+            lines = self.console.render_lines(self.pad(picture, live=True), pad=False)
+            self.tallest = max(self.tallest, len(lines))
         super().play(frames, *args, **kwargs)
 
 
 @pytest.mark.parametrize("width", [80, 100])
-def test_no_frame_is_cut_off_at_the_edge_of_the_terminal(width):
+def test_every_frame_fits_the_terminal(width):
     stage = EveryFrame(recording(width), animate=False)
     longhand.run(stage, "The Wolf and the")
     assert stage.cut == []
+    assert stage.tallest + 2 <= longhand.ROWS  # and a blank line and the prompt under it
     text = stage.console.export_text()
     for title in ("Embedding", "Layer 1 · RoPE", "Layer 2 · switch", "The next word"):
         assert title in text

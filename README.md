@@ -160,7 +160,8 @@ operation happen to real numbers: the embedding lookup, RMSNorm, every product a
 every matrix multiply, RoPE turning each pair, the scores, the mask and softmax, the blend of
 values, the residual adds, SwiGLU's switch, and the scores for every word. What's being read
 is lit up in purple and what's being written in green, and at the end its longhand answer
-matches the model's own forward pass exactly.
+matches the model's own forward pass exactly. It needs a terminal at least 80 columns wide
+and 26 rows tall.
 
 ```sh
 attention math                      # reads “The Fox and the”

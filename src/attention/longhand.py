@@ -46,6 +46,7 @@ from .train import Adam, clip
 
 ANIMALS = 8  # the commonest in titles like The Fox and the Crow
 CONTEXT = 8
+ROWS = 26  # the tallest picture, a blank line and the prompt: the terminal needs this many
 READ = viz.style("#ffffff", viz.ACCENT, bold=True)  # numbers being read
 WRITE = viz.style(viz.DARK, viz.GREEN, bold=True)  # the number being written
 

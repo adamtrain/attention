@@ -184,7 +184,7 @@ def playground(stage: Stage, lab: Lab) -> None:
         return Group(Text("Your turn.", style="bold"), help_line, Text(""), *rows)
 
     with stage.live() as live:
-        live.update(stage.pad(view()), refresh=True)
+        live.update(stage.pad(view(), live=True), refresh=True)
         while True:
             key = stage.key()
             if key in ("right", "enter", "tab"):
@@ -202,7 +202,7 @@ def playground(stage: Stage, lab: Lab) -> None:
                     lab.model, lab.tokenizer, lab.rng, "", t, top_ps[p], top_ks[k], limit=32
                 )
                 history.append((settings(), text))
-            live.update(stage.pad(view()), refresh=True)
+            live.update(stage.pad(view(), live=True), refresh=True)
 
 
 # ── Hallucination ─────────────────────────────────────────────────────────────

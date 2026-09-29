@@ -573,18 +573,30 @@ def longhand_math(
     fast: Annotated[bool, typer.Option("--fast", help="Speed up the animations.")] = False,
 ) -> None:
     """Watch every operation of the forward pass, on a model small enough to print."""
+    small = out.is_terminal and (out.width < 80 or out.height < longhand.ROWS)
+    if small:
+        err.print(
+            f"[faint]attention math draws tables up to 80 columns wide and {longhand.ROWS} rows "
+            f"tall, and this terminal is {out.width} × {out.height}: make it bigger if you can.[/]"
+        )
     interactive = Keys.available() and not auto
     autopilot = auto or (out.is_terminal and not interactive)
     stage = Stage(
         out, animate=out.is_terminal, auto=3.5 if autopilot else None, speed=2.5 if fast else 1.0
     )
+
+    def start() -> None:
+        if small:
+            stage.wait("start")  # a moment to make the terminal bigger first
+        longhand.run(stage, text, seed)
+
     try:
         if interactive:
             with Keys() as keys:
                 stage.keys = keys
-                longhand.run(stage, text, seed)
+                start()
         else:
-            longhand.run(stage, text, seed)
+            start()
     except ValueError as e:
         raise fail(str(e)[0].upper() + str(e)[1:] + ".") from e
     except (Quit, KeyboardInterrupt):
