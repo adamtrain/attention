@@ -11,7 +11,7 @@ from .corpus import VOCAB, Corpus, Dataset
 from .model import Array, Config, Transformer, cross_entropy, groups, part
 
 PASSES = 16  # how many times, on average, pretraining reads each token of its text
-STEPS = (600, 3000)  # the fewest and most steps it will take
+STEPS = (600, 3600)  # the fewest and most steps it will take: the most, about 9 minutes
 BATCH = 16  # stretches of text per step
 CONTEXT = 128  # tokens per stretch, and the most the model can read at once
 LEARNING_RATE = 0.01
@@ -106,7 +106,8 @@ def steps_for(data: Dataset, batch: int = BATCH, context: int = CONTEXT) -> int:
     """Enough steps to read the training text about PASSES times, to the nearest hundred.
 
     More text means more steps. Fewer, and the model would still be learning when it stopped;
-    many more, and it would start memorizing the text instead of learning from it.
+    many more, and it would start memorizing the text instead of learning from it. A big text
+    hits the ceiling first and is read fewer times, the way big models read most of theirs once.
     """
     steps = round(PASSES * len(data.train) / (batch * context), -2)
     return int(min(max(steps, STEPS[0]), STEPS[1]))

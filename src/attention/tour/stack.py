@@ -82,6 +82,7 @@ def run(stage: Stage, lab: Lab) -> None:
             block.gate[0, focus],
             block.up[0, focus],
             block.out[0, focus] - block.mid[0, focus],
+            stage.width,
         )
     )
     stage.say(
@@ -175,26 +176,26 @@ def run(stage: Stage, lab: Lab) -> None:
     )
 
 
-def mlp(x: np.ndarray, gate: np.ndarray, up: np.ndarray, out: np.ndarray) -> Group:
+def mlp(x: np.ndarray, gate: np.ndarray, up: np.ndarray, out: np.ndarray, width: int) -> Group:
     """One position through the MLP: widen twice, switch one, multiply, narrow."""
     switched = silu(gate)
     mixed = switched * up
+    room = width - len("SiLU(gate)") - 2
+    shown = min(len(gate), 2 * room)  # as many detectors as fit, two to a character at most
     grid = Table.grid(padding=(0, 2))
     grid.add_column(style="bold", no_wrap=True)
     grid.add_column(no_wrap=True)
     wide = viz.scale_of(np.concatenate([gate, up]))
-    grid.add_row("in", viz.signed_cells(x, viz.scale_of(x), 1))
-    grid.add_row("gate", viz.signed_cells(gate[:64], wide, 1))
-    grid.add_row("SiLU(gate)", viz.signed_cells(switched[:64], wide, 1))
-    grid.add_row("up", viz.signed_cells(up[:64], wide, 1))
-    grid.add_row("SiLU × up", viz.signed_cells(mixed[:64], viz.scale_of(mixed), 1))
-    grid.add_row("down", viz.signed_cells(out, viz.scale_of(out), 1))
+    grid.add_row("in", viz.signed_fitted(x, viz.scale_of(x), room))
+    grid.add_row("gate", viz.signed_fitted(gate[:shown], wide, room))
+    grid.add_row("SiLU(gate)", viz.signed_fitted(switched[:shown], wide, room))
+    grid.add_row("up", viz.signed_fitted(up[:shown], wide, room))
+    grid.add_row("SiLU × up", viz.signed_fitted(mixed[:shown], viz.scale_of(mixed), room))
+    grid.add_row("down", viz.signed_fitted(out, viz.scale_of(out), room))
     open_ = int((switched > 0.1 * np.abs(switched).max()).sum())
+    some = f" (the first {shown} shown)" if shown < len(gate) else ""
     caption = Text.assemble(
-        (
-            f"{len(x)} numbers in; {len(gate)} gate and up detectors (the first 64 shown); ",
-            viz.FAINT,
-        ),
+        (f"{len(x)} numbers in; {len(gate)} gate and up detectors{some}; ", viz.FAINT),
         (f"{open_} gates open", "bold"),
         (f"; {len(out)} numbers out, added onto the stream", viz.FAINT),
     )

@@ -49,10 +49,14 @@ class Corpus:
     def family(self, document: str) -> str:
         """What groups a document with its relatives: its title, if it has one.
 
-        The same fable told in three translations is one family. When one version is held back
-        to test the model, they all are, or the test would be partly an exam it had seen.
+        The same fable told in three translations is one family, even if one calls it The Fox
+        and the Grapes and another Fox and the Grapes. When one version is held back to test
+        the model, they all are, or the test would be partly an exam it had seen.
         """
-        return document.split("\n", 1)[0].lower() if self.titled else document
+        if not self.titled:
+            return document
+        words = re.findall(r"[a-z]+", document.split("\n", 1)[0].lower())
+        return " ".join(words[1:] if words[:1] in (["the"], ["a"], ["an"]) else words)
 
     @property
     def characters(self) -> int:
@@ -62,7 +66,7 @@ class Corpus:
 BUILT_IN: dict[str, dict] = {
     "fables": {
         "title": "Fables", "noun": "fable", "plural": "fables",
-        "blurb": "fables of Aesop, in four translations",
+        "blurb": "fables of Aesop and others, from Greece to India",
         "example": "The Fox and the Grapes\n\n"
                    "A hungry Fox saw some fine bunches of Grapes hanging from a vine",
         "probe": "The Fox and the",
@@ -71,7 +75,7 @@ BUILT_IN: dict[str, dict] = {
     },
     "fairytales": {
         "title": "Fairy tales", "noun": "tale", "plural": "fairy tales",
-        "blurb": "tales collected by the Brothers Grimm",
+        "blurb": "tales from Grimm, Andersen and Andrew Lang's Fairy Books",
         "example": "Hansel and Grethel\n\nHard by a great forest dwelt a poor wood-cutter with "
                    "his wife and his two children. The boy was called Hansel and the girl Grethel.",
         "probe": "There was once a",
@@ -83,11 +87,11 @@ BUILT_IN: dict[str, dict] = {
     },
     "shakespeare": {
         "title": "Shakespeare", "noun": "scene", "plural": "scenes",
-        "blurb": "scenes from eight of Shakespeare's plays",
+        "blurb": "scenes from all 38 of Shakespeare's plays",
         "example": "JULIET:\nO Romeo, Romeo, wherefore art thou Romeo?\n"
                    "Deny thy father and refuse thy name.",
         "probe": "I thank you, my good",
-        "niche": Niche(r"^HAMLET:", "scenes where Hamlet speaks"),
+        "niche": Niche(r"^FALSTAFF:", "scenes where Falstaff speaks"),
         "titled": False,
         "play": True,
     },

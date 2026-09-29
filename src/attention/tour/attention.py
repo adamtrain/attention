@@ -72,7 +72,8 @@ def run(stage: Stage, lab: Lab) -> None:
         f"products. Here's the first number of the query at `{me}`, from the first column of "
         f"the query grid in layer 1. Each is {c.width} numbers, drawn as colors:"
     )
-    stage.show(column(block.a_in[0, focus], lab.model.params["layers.0.attn.query"][:, 0], me))
+    query = lab.model.params["layers.0.attn.query"][:, 0]
+    stage.show(column(block.a_in[0, focus], query, me, stage.width))
     stage.say(
         f"Do that for all {c.heads * c.head_width} columns and you have the query. The key and "
         "value grids work the same way. So at every position, in every layer:"
@@ -233,16 +234,17 @@ def toy() -> Iterator[Frame]:
 # ── Where the vectors come from ───────────────────────────────────────────────
 
 
-def column(x: np.ndarray, col: np.ndarray, token: str) -> Table:
+def column(x: np.ndarray, col: np.ndarray, token: str, width: int) -> Table:
     """One output number: a vector and one column of a grid, multiplied in pairs, added up."""
     products = x * col
     grid = Table.grid(padding=(0, 1))
     grid.add_column(no_wrap=True, justify="right", style=viz.FAINT)
     grid.add_column(no_wrap=True)
     at = f"at {token}" if len(token) <= 7 else "the vector"  # no wider than "= products"
-    grid.add_row(at, viz.signed_cells(x, viz.scale_of(x), 1))
-    grid.add_row("× column 1", viz.signed_cells(col, viz.scale_of(col), 1))
-    grid.add_row("= products", viz.signed_cells(products, viz.scale_of(products), 1))
+    room = width - len("= products") - 1
+    grid.add_row(at, viz.signed_fitted(x, viz.scale_of(x), room))
+    grid.add_row("× column 1", viz.signed_fitted(col, viz.scale_of(col), room))
+    grid.add_row("= products", viz.signed_fitted(products, viz.scale_of(products), room))
     grid.add_row(
         "",
         Text.assemble(
@@ -289,10 +291,11 @@ def dot_product(q: np.ndarray, k: np.ndarray, me: str, them: str, width: int) ->
     products = q * k
     rows = np.stack([q, k, products])
     scale = viz.scale_of(rows)
-    cell = 5 if width >= 16 * 5 + 16 else 3
+    names = [f"query of {me}", f"key of {them}", "multiplied"]
+    cell = 5 if max(map(len, names)) + 2 + 5 * len(q) <= width else 3  # room for the numbers?
     lines = viz.matrix_grid(
         rows,
-        [f"query of {me}", f"key of {them}", "multiplied"],
+        names,
         [str(i + 1) for i in range(len(q))],
         lambda v: viz.SIGNED.diverging(v, scale),
         fmt=".1f" if cell >= 5 else None,

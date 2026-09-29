@@ -96,8 +96,8 @@ def test_conversations_follow_the_chat_template(trained):
 def test_plays_turn_into_lines_and_replies():
     corpus = built_in("shakespeare")
     first = exchanges(corpus, corpus.documents[:1])[0]
-    assert first.request == "Gregory, on my word, we'll not carry coals."
-    assert first.reply.startswith("GREGORY:\n")
+    assert first.request == "In delivering my son from me, I bury a second husband."  # the Countess
+    assert first.reply.startswith("BERTRAM:\n")  # and her son answers
 
 
 def test_feedback_makes_liked_texts_likelier_on_a_copy(trained):

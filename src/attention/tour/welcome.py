@@ -33,7 +33,7 @@ def title(stage: Stage) -> None:
         f"Yours will have about {round(size, -4):,} [b]parameters[/b], the numbers a model "
         "learns. GPT-3 has 175 billion, and today's largest models have more than a trillion. "
         "Yours will train "
-        "for a couple of minutes, right here on this computer, and you'll see every number "
+        "for a few minutes, right here on this computer, and you'll see every number "
         "that matters along the way."
     )
 

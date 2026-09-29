@@ -25,11 +25,11 @@ EPS = 1e-5
 class Config:
     vocab: int  # how many different tokens there are
     context: int  # the most tokens the model can read at once
-    width: int = 64  # numbers per token in the residual stream
+    width: int = 96  # numbers per token in the residual stream
     layers: int = 4  # blocks, stacked
-    heads: int = 4  # attention heads per layer, each asking its own question
-    kv_heads: int = 2  # key and value heads per layer, each shared by a group of query heads
-    hidden: int = 192  # width of the MLP's middle
+    heads: int = 6  # attention heads per layer, each asking its own question
+    kv_heads: int = 3  # key and value heads per layer, each shared by a group of query heads
+    hidden: int = 288  # width of the MLP's middle
     rope_base: float = 10_000.0  # how slowly the slowest position rotation turns
 
     @property

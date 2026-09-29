@@ -382,7 +382,7 @@ def embedding_push(
     scale = viz.scale_of(push[shown])
     sizes = [f"{float(np.abs(push[t]).sum()):.3f}" for t in shown]
     tiles = max(len(label(tok, t)) + 2 for t in shown)
-    numbers = tiles + 1 + push.shape[1] + 1 + max(map(len, sizes)) <= width  # room for sizes?
+    room = width - tiles - 1 - 1 - max(map(len, sizes))  # beside each token, with its size after
     grid = Table.grid(padding=(0, 1))
     grid.add_column(no_wrap=True, justify="right")
     grid.add_column(no_wrap=True)
@@ -392,8 +392,8 @@ def embedding_push(
         for token in rows:
             grid.add_row(
                 chip(tok, token),
-                viz.cells(push[token], (viz.NUDGE.diverging(v, scale) for v in push[token]), 1),
-                Text(sizes[shown.index(token)] if numbers else "", style=viz.FAINT),
+                viz.fitted((viz.NUDGE.diverging(v, scale) for v in push[token]), room),
+                Text(sizes[shown.index(token)], style=viz.FAINT),
             )
     grid.add_row("", Text(""), "")
     grid.add_row("", viz.legend(viz.NUDGE, "down", "up"), "")

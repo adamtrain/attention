@@ -14,21 +14,21 @@
 </p>
 
 <p align="center">
-  <img src="docs/hero.svg" width="860" alt="The live pretraining dashboard at step 500 of 1,200, training on fables. A braille loss chart has fallen from over 7 to below the dashed line for what counting token pairs would score, with the training loss at 4.21 and the held-back loss at 4.53. Beside it, text the model is writing, shaded token by token: The Ass and the Cat. A Ass saw a hunning in the Crow and killed an Ox and differs behind the dove, the Ass watched the Tortoise. Below, bars for how hard backprop is pushing on each layer, the likeliest next tokens after The Fox and the (Wolf 4.8%, Lion 4.8%, F, Crow, Fox, Bull), and each layer's best guess at the same spot, from the embeddings to layer 4.">
+  <img src="docs/hero.svg" width="860" alt="The live pretraining dashboard at step 1,300 of 2,800, training on fables. A braille loss chart has fallen from over 7 to below dashed lines for what counting tokens and counting token pairs would score, with the training loss at 3.91 and the held-back loss at 4.24. Beside it, text the model is writing, shaded token by token: The Man and the Raconal. A Kinol who had been told for a complidance, these could not see what the Ass, who had leaned at so joined in a garden of Reel. Below, bars for how hard backprop is pushing on each layer, the likeliest next tokens after The Fox and the (Lion 4.2%, then L, Ass, W, Eagle and Dog), and each layer's best guess at the same spot, from the embeddings to layer 4.">
 </p>
 
 ## Why attention
 
 - **It's the real design, just small.** Text split into tokens by byte-pair encoding, and a
   four-layer transformer built like Llama: rotary position embeddings, grouped-query
-  attention, a gated (SwiGLU) MLP, RMSNorm and tied embeddings. It has about 330,000
+  attention, a gated (SwiGLU) MLP, RMSNorm and tied embeddings. It has about 640,000
   parameters to Llama 3 8B's 8 billion, and it trains in a few minutes on your computer.
 - **Queries, keys and values, for real.** A soft dictionary lookup on made-up numbers, then
   your model's real grids; why a key is not a value; and an experiment in which a two-layer
   model grows an induction head that a one-layer model can't, showing exactly what each of
   the three vectors is for.
 - **Layers you can see into.** The residual stream, the logit lens (what the model would guess
-  if it stopped after each layer), and what each of its sixteen heads learned to look at.
+  if it stopped after each layer), and what each of its twenty-four heads learned to look at.
 - **Inference the way it's really done.** A working KV cache, prefill and decode, why
   grouped-query attention exists, what API prompt caching keeps, and the dials you'll find in
   every chatbot's API: temperature, top-k and top-p.
@@ -70,14 +70,14 @@ it's about to show before it moves.
 
 ## The tour
 
-First you choose what your model will learn to write: **fables** (Aesop, in four
-translations), **fairy tales** (the Brothers Grimm) or **Shakespeare** (scenes from eight
-plays). Then you go through twenty chapters:
+First you choose what your model will learn to write: **fables** (Aesop and others, from
+Greece to India), **fairy tales** (Grimm, Andersen and Andrew Lang's Fairy Books) or
+**Shakespeare** (all of his plays). Then you go through twenty chapters:
 
 | | | |
 | --- | --- | --- |
 | 1 | **Tokens** | Byte-pair encoding, live on your text: the merges, the vocabulary it builds, special tokens like `<\|endoftext\|>`, and every position as a next-token quiz. |
-| 2 | **Embeddings** | Each token looks up a row of 64 learned numbers, and the residual stream begins. |
+| 2 | **Embeddings** | Each token looks up a row of 96 learned numbers, and the residual stream begins. |
 | 3 | **Attention** | A fuzzy dictionary lookup: queries, keys and values, first with made-up numbers, then in your model. Why three vectors, the QK and OV circuits, the causal mask, heads, and grouped-query attention. |
 | 4 | **Position** | Why attention alone can't tell order, and RoPE: turning queries and keys like clock hands, so a match depends on distance. |
 | 5 | **Softmax** | Scores become probabilities, and temperature makes guesses bolder or safer. |
@@ -87,7 +87,7 @@ plays). Then you go through twenty chapters:
 | 9 | **Gradient descent** | Three learning rates race down a landscape; one real step; AdamW, the learning-rate schedule and gradient clipping. |
 | 10 | **Pretraining** | The live dashboard above: a few minutes of real training, with each layer's guess taking shape. |
 | 11 | **Memorizing** | A model with too little to read, for too long: overfitting, and pulling a memorized fable back out of it word for word. |
-| 12 | **What it learned** | Before and after, which tokens ended up neighbors, what each of the 16 heads looks at, and the logit lens. |
+| 12 | **What it learned** | Before and after, which tokens ended up neighbors, what each of the 24 heads looks at, and the logit lens. |
 | 13 | **Why layers stack** | A one-layer and a two-layer model race to learn in-context copying; only the two-layer one can. Then its induction head, taken apart: the clearest reason a key is not a value. |
 | 14 | **Inference** | Writing one token at a time, the dart that picks them, temperature, top-k, top-p, greedy decoding, and hallucination. |
 | 15 | **The KV cache** | Why keys and values are kept and queries aren't, prefill and decode, the speed-up measured on your model, and what the cache costs at Llama's scale. |
@@ -110,35 +110,35 @@ string of words. Only the second can: its first layer writes “the word before 
 position, and its second layer's keys read it. That's an induction head.
 
 <p align="center">
-  <img src="docs/layers.svg" width="860" alt="Chapter 13, Why layers stack. A loss chart over 2,000 steps: a one-layer model creeps down and stalls at 2.83, while a two-layer model drops suddenly around step 600, to 0.17. Below, the two-layer model's circuit on a string of words. Layer 1's head, at the first one, lights up out, the word just before it. Layer 2's head, at the second out, lights up one. So after the second out, it predicts one: the word that came after the first one.">
+  <img src="docs/layers.svg" width="860" alt="Chapter 13, Why layers stack. A loss chart over 2,000 steps: a one-layer model creeps down and stalls at 2.83, while a two-layer model drops suddenly around step 600, to 0.17. Below, the two-layer model's circuit on a string of words. Layer 1's head, at the first but, lights up up, the word just before it. Layer 2's head, at the second up, lights up but. So after the second up, it predicts but: the word that came after the first one.">
 </p>
 
 **The logit lens.** Stop after each layer and read the residual stream as if it were the end
 of the model: some answers are clear after one layer, others only come together at the last.
 
 <p align="center">
-  <img src="docs/lens.svg" width="860" alt="Chapter 12, What it learned. The logit lens: for each of the first ten quizzes in The Fox and the Grapes, the right answer's probability after the embeddings and after each of the four layers, shaded from dark to bright, with the top guess beside it when that isn't the answer. The word Grapes is three tokens, G, ra and pes, and pes after ra only comes together in the last layer, at 42%; the paragraph break after Grapes climbs from 9.3% after layer 2 to 71% after layer 3 and 100% after layer 4.">
+  <img src="docs/lens.svg" width="860" alt="Chapter 12, What it learned. The logit lens: for each of the first ten quizzes in The Fox and the Grapes, the right answer's probability after the embeddings and after each of the four layers, shaded from dark to bright, with the top guess beside it when that isn't the answer. The word Grapes is three tokens, G, ra and pes, and pes after ra only comes together in the last layer, from 10% to 91%; the paragraph break after Grapes stays under 1% until the last layer, where it reaches 99%.">
 </p>
 
 **The KV cache.** Every layer's keys and values, kept for every position written so far, so
 that each new token only needs its own. At Llama's scale, that's gigabytes per conversation.
 
 <p align="center">
-  <img src="docs/cache.svg" width="760" alt="Chapter 15, The KV cache. A grid with a row for each of the last ten tokens written and, for each of the four layers, a key square and a value square for each of its two key/value heads: 12 rows kept, 3,072 numbers. Below, the cache's size in 16-bit numbers: 64 KB for yours at 128 tokens, 1 GB for Llama 3 8B at 8,192 tokens, 16 GB for a 131,072-token conversation, and 64 GB without grouped-query attention.">
+  <img src="docs/cache.svg" width="760" alt="Chapter 15, The KV cache. A grid with a row for each of the last ten tokens written and, for each of the four layers, a key square and a value square for each of its three key/value heads: 12 rows kept, 4,608 numbers. Below, the cache's size in 16-bit numbers: 96 KB for yours at 128 tokens, 1 GB for Llama 3 8B at 8,192 tokens, 16 GB for a 131,072-token conversation, and 64 GB without grouped-query attention.">
 </p>
 
 **Memorizing.** Given too little to read, for too long, a model learns its text by heart:
 start one of its fables for it, and it recites the rest.
 
 <p align="center">
-  <img src="docs/memorizing.svg" width="860" alt="Chapter 11, Memorizing. A loss chart for a model trained for 1,200 steps on a twentieth of the fables, with no weight decay. Its loss on its own text falls to 0.13, while its held-back loss dips to its best early on, marked with a green triangle, then climbs past a dashed guessing line to 12.28, far above a green line for your own model. Beside it, given the opening of one of its own fables, The Frogs Asking for a King, it recites the rest word for word, shaded red; given the opening of one it never saw, The Bundle of Sticks, it writes nonsense. A meter reads recited 100%.">
+  <img src="docs/memorizing.svg" width="860" alt="Chapter 11, Memorizing. A loss chart for a model trained for 1,200 steps on a twentieth of the fables, with no weight decay. Its loss on its own text falls to 0.29, while its held-back loss dips to its best early on, marked with a green triangle, then climbs past a dashed guessing line to 12.10, far above a green line for your own model. Beside it, given the opening of one of its own fables, The Fox and the Goat, it recites the rest word for word, shaded red; given the opening of one it never saw, The Tiger and the Shadow, it writes nonsense. A meter reads recited 100%.">
 </p>
 
 **Fine-tuning and LoRA.** A copy of your model specializes in one kind of story. LoRA does it
 by learning small corrections to a frozen model, and forgets less along the way.
 
 <p align="center">
-  <img src="docs/finetuning.svg" width="760" alt="Chapter 18, Fine-tuning. A table comparing full fine-tuning with rank-8 LoRA, both teaching the model fables about the Wolf: 328,256 numbers learned against 38,912; 92% of what full fine-tuning writes is about the Wolf, against 98% for LoRA; they moved the weights by 21% and 18%; the held-back loss is 5.51 against 4.61; and the file to keep is 641 KB against 76 KB.">
+  <img src="docs/finetuning.svg" width="760" alt="Chapter 18, Fine-tuning. A table comparing full fine-tuning with rank-8 LoRA, both teaching the model fables about the Wolf: 639,840 numbers learned against 58,368; 90% of what full fine-tuning writes is about the Wolf, against 92% for LoRA; they moved the weights by 17% and 16%; the held-back loss is 5.08 against 4.35; and the file to keep is 1,250 KB against 114 KB.">
 </p>
 
 ### A note on backprop at inference
@@ -169,7 +169,7 @@ attention clean                            # delete it all when you're done
 ```
 
 <p align="center">
-  <img src="docs/commands.svg" width="760" alt="Two commands. attention generate -n 1 The Fox and the carries on: The Fox and the Fox. A Horse, acrossing a tree and roaming being overtented, broke to a short time, as a large number of gold by, all the Serpent began to recover it, shaded token by token. attention explain The Fox and the shows the model, Acients, reading it: where the last token looked in each of the four layers, the likeliest next tokens (Fox 9.4%, then Lion, Wolf, Ass, Dog and Monkey), each layer's best guess from the logit lens, and which tokens mattered most, found by backprop: the last one, the, at 43%.">
+  <img src="docs/commands.svg" width="760" alt="Two commands. attention generate -n 1 The Fox and the carries on: The Fox and the Hound. A Treesop who had been set about to get hold of the forest, tending to be eaten by the animals, but he was just burstooded in the Temple of Goder, shaded token by token. attention explain The Fox and the shows the model, Wrether, reading it: where the last token looked in each of the four layers, the likeliest next tokens (Fox 13%, then Lion, Cock, G, Wolf and H), each layer's best guess from the logit lens, and which tokens mattered most, found by backprop: the last one, the, at 41%.">
 </p>
 
 In what it writes, anything shaded red is a run of twelve tokens or more copied word for word
@@ -206,7 +206,7 @@ from its training text; the rest it made up.
 
 Your model lives in `~/.local/share/attention/model.npz` (or `$XDG_DATA_HOME/attention`, or
 `%LOCALAPPDATA%\attention` on Windows; set `$ATTENTION_HOME` to put it anywhere), with its
-chat version beside it in `model.chat.npz`. Each is about 3 MB: a plain NumPy archive with the
+chat version beside it in `model.chat.npz`. Each is 5 to 8 MB: a plain NumPy archive with the
 weights, the tokenizer's merges, the text it learned from, and a small JSON card, so
 `numpy.load` opens it too.
 
@@ -232,9 +232,9 @@ The model is a small Llama-style transformer, written out by hand in NumPy:
 | | |
 | --- | --- |
 | **Tokens** | Byte-pair encoding learned from the training text: 2,048 tokens, of which 3 are special (`<\|endoftext\|>`, `<\|user\|>`, `<\|assistant\|>`), 96 are single characters, and 1,949 are merges. Text is cut into chunks first with GPT-2's rule, keeping runs of newlines together as GPT-4's does |
-| **Architecture** | Token embeddings, then 4 layers of: RMSNorm → causal self-attention (4 query heads sharing 2 key/value heads, with rotary position embeddings on the queries and keys) → RMSNorm → SwiGLU MLP (64 → 192 → 64), each with a residual connection. Then RMSNorm, and the embedding table again for the output |
-| **Size** | 64 numbers per token, 328,256 parameters (131,072 of them in the embedding table), and a context window of 128 tokens |
-| **Training** | AdamW (β 0.9 and 0.95, weight decay 0.1), 16 stretches of 128 tokens a step, learning rate 0.01 after a 100-step warmup, easing down along a cosine to 0.001, with the gradient clipped at 1.0. Enough steps to read the text about 16 times: about 1,200 for the fables, 2,200 for Shakespeare and 2,800 for the fairy tales. A tenth of the documents are held back, to measure real progress rather than memorization |
+| **Architecture** | Token embeddings, then 4 layers of: RMSNorm → causal self-attention (6 query heads sharing 3 key/value heads, with rotary position embeddings on the queries and keys) → RMSNorm → SwiGLU MLP (96 → 288 → 96), each with a residual connection. Then RMSNorm, and the embedding table again for the output |
+| **Size** | 96 numbers per token, 639,840 parameters (196,608 of them in the embedding table), and a context window of 128 tokens |
+| **Training** | AdamW (β 0.9 and 0.95, weight decay 0.1), 16 stretches of 128 tokens a step, learning rate 0.01 after a 100-step warmup, easing down along a cosine to 0.001, with the gradient clipped at 1.0. Enough steps to read the text about 16 times, but no more than 3,600, about 9 minutes on a laptop: about 2,800 for the fables, which it does read about 16 times, and 3,600 for Shakespeare and the fairy tales, which it reads about 5 times and 3 times. The biggest models read most of their text only once. A tenth of the documents are held back, to measure real progress rather than memorization |
 | **Baselines** | The dashboard's dashed lines are what you'd score with no neural network: counting how common each token is, and counting which token follows which |
 
 There's no autograd library. Each layer has a forward function and a backward function, the
@@ -258,14 +258,20 @@ The three built-in corpora are public-domain books from [Project
 Gutenberg](https://www.gutenberg.org), with the licensing boilerplate, front matter, stage
 directions and footnotes taken out, and turned into plain ASCII:
 
-- **Fables**: *Three Hundred Aesop's Fables*, translated by George Fyler Townsend (1867); *The
-  Fables of Aesop*, retold by Joseph Jacobs (1894); *Aesop's Fables*, translated by V. S.
-  Vernon Jones (1912); and *The Aesop for Children* (1919). 826 fables, 594 KB.
-- **Fairy tales**: *Household Tales by Brothers Grimm*, translated by Margaret Hunt (1884).
-  210 tales, 1.5 MB.
-- **Shakespeare**: *Romeo and Juliet*, *Hamlet*, *Macbeth*, *A Midsummer Night's Dream*,
-  *Julius Caesar*, *The Tempest*, *Twelfth Night* and *Much Ado About Nothing*, from *The
-  Complete Works of William Shakespeare*. 137 scenes, 923 KB.
+- **Fables**: four books of Aesop: *Three Hundred Aesop's Fables*, translated by George Fyler
+  Townsend (1867); *The Fables of Aesop*, retold by Joseph Jacobs (1894); *Aesop's Fables*,
+  translated by V. S. Vernon Jones (1912); and *The Aesop for Children* (1919). Then *The
+  Talking Beasts*, fables from Aesop to Bidpai and Krylov, edited by Kate Douglas Wiggin and
+  Nora Archibald Smith (1911); Jataka tales from India in W. H. D. Rouse's *The Giant Crab*
+  (1897) and Ellen C. Babbitt's *Jataka Tales* (1912) and *More Jataka Tales* (1922); and
+  Ambrose Bierce's *Fantastic Fables* (1899). 1,399 fables, 1.4 MB.
+- **Fairy tales**: *Household Tales by Brothers Grimm*, translated by Margaret Hunt (1884);
+  *Fairy Tales of Hans Christian Andersen*; and all twelve of Andrew Lang's colored Fairy
+  Books, from *The Blue Fairy Book* (1889) to *The Lilac Fairy Book* (1910). A tale retold
+  under the same title in more than one book is kept, like a fable in several translations,
+  and all its versions are held back together. 841 tales, 10.1 MB.
+- **Shakespeare**: all 38 plays, from *The Complete Works of William Shakespeare*. 744 scenes,
+  4.8 MB.
 
 `uv run scripts/corpora.py` downloads the books and rebuilds them.
 

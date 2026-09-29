@@ -111,8 +111,9 @@ class Lab:
         return Memory(self.data.train)
 
     def example(self) -> tuple[np.ndarray, np.ndarray]:
-        """The example passage as input and target ids, each shaped (1, time)."""
-        ids = prompt(self.tokenizer, self.corpus.example)
+        """The example passage as input and target ids, each shaped (1, time): as much as the
+        model can read at once, if it's longer."""
+        ids = prompt(self.tokenizer, self.corpus.example)[: self.model.config.context + 1]
         return np.array([ids[:-1]]), np.array([ids[1:]])
 
     def probe(self) -> list[int]:

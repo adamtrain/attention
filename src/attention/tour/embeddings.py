@@ -34,8 +34,8 @@ def run(stage: Stage, lab: Lab) -> None:
     scale = viz.scale_of(table)
     stage.show(rows(lab, ids, scale, stage.width))
     stage.say(
-        f"Each row is one token, each column one of its {width} numbers, and the color shows "
-        "each number's sign and size. Think of the numbers as dials that together describe a "
+        f"Each row is one token, each stripe of color one of its {width} numbers, and the color "
+        "shows each number's sign and size. Think of the numbers as dials that together describe a "
         "token: one might end up meaning “is this a name?”, another “does this end a "
         "sentence?”. Tokens that behave alike get similar settings, so whatever the model "
         "learns about one of them partly carries over to the rest."
@@ -105,7 +105,7 @@ def repeated(lab: Lab, inputs: np.ndarray) -> tuple[str, int, int] | None:
 def rows(lab: Lab, ids: list[int], scale: float, width: int) -> Table:
     tok = lab.tokenizer
     tiles = max(len(label(tok, t)) + 2 for t in ids)
-    numbers = tiles + 1 + len(str(max(ids))) + 1 + lab.model.config.width <= width  # ids fit?
+    room = width - tiles - 1 - len(str(max(ids))) - 1  # beside each token and its id
     grid = Table.grid(padding=(0, 1))
     grid.add_column(no_wrap=True, justify="right")
     grid.add_column(no_wrap=True, justify="right")
@@ -117,8 +117,8 @@ def rows(lab: Lab, ids: list[int], scale: float, width: int) -> Table:
         seen.append(token)
         grid.add_row(
             chip(tok, token),
-            Text(str(token) if numbers else "", style=viz.FAINT),
-            viz.signed_cells(lab.model.params["embed"][token], scale, 1),
+            Text(str(token), style=viz.FAINT),
+            viz.signed_fitted(lab.model.params["embed"][token], scale, room),
         )
     grid.add_row("", "", "")
     grid.add_row("", "", viz.legend(viz.SIGNED, "negative", "positive"))
@@ -128,14 +128,12 @@ def rows(lab: Lab, ids: list[int], scale: float, width: int) -> Table:
 def stream_shape(lab: Lab, x: np.ndarray, ids: list[int], scale: float, width: int) -> Table:
     tok = lab.tokenizer
     tiles = max(len(label(tok, t)) + 2 for t in ids[:8])
-    numbers = tiles + 1 + x.shape[1] + 2 <= width  # room for the row numbers?
+    room = width - tiles - 1 - 2  # beside each token, with its row number after
     grid = Table.grid(padding=(0, 1))
     grid.add_column(no_wrap=True, justify="right")
     grid.add_column(no_wrap=True)
     grid.add_column(no_wrap=True, style=viz.FAINT)
     for i, token in enumerate(ids[:8]):
-        grid.add_row(
-            chip(tok, token), viz.signed_cells(x[i + 1], scale, 1), f"{i + 1}" if numbers else ""
-        )
+        grid.add_row(chip(tok, token), viz.signed_fitted(x[i + 1], scale, room), f"{i + 1}")
     grid.add_row(Text("…", style=viz.FAINT), Text(f"{len(x)} rows in all", style=viz.FAINT), "")
     return grid

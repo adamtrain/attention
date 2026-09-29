@@ -127,6 +127,7 @@ def filling(lab: Lab, width: int, start: int = 5, steps: int = 6) -> Iterator[Fr
             len(ids),
             "prefill",
             f"the prompt, {len(ids)} tokens, in one pass",
+            width,
         ),
         2.5,
     )
@@ -144,6 +145,7 @@ def filling(lab: Lab, width: int, start: int = 5, steps: int = 6) -> Iterator[Fr
                 len(written) - 1,
                 "decode",
                 f"write {label(tok, pick.token)}: one new query, used and thrown away; one new row, kept",
+                width,
             ),
             1.4,
         )
@@ -155,34 +157,36 @@ def filling(lab: Lab, width: int, start: int = 5, steps: int = 6) -> Iterator[Fr
             len(written),
             "decode",
             f"{len(written)} rows kept, {2 * c.layers * c.kv_heads * c.head_width * len(written):,} numbers",
+            width,
         ),
         0.5,
     )
 
 
-def cache_view(lab: Lab, ids: list[int], cached: int, newest: int, phase: str, what: str) -> Group:
+def cache_view(
+    lab: Lab, ids: list[int], cached: int, newest: int, phase: str, what: str, width: int
+) -> Group:
     tok, c = lab.tokenizer, lab.model.config
     shown = ids[-SHOWN:]
     offset = len(ids) - len(shown)
+    names = max(len(label(tok, t)) for t in shown)
+    heads = " ".join(f"K{h + 1} V{h + 1}" for h in range(c.kv_heads))
+    square = "■  ■ "  # a key and a value, under the K and the V of K1 V1
+    if names + c.layers * (len(heads) + 3) > width:  # too wide: squares close together
+        heads, square = " ".join("K V" for _ in range(c.kv_heads)), "■ ■"
     grid = Table.grid(padding=(0, 1))
     grid.add_column(no_wrap=True, justify="right")
     for _ in range(c.layers):
         grid.add_column(no_wrap=True)
     grid.add_row("", *(Text(f"layer {i + 1}", style=viz.FAINT) for i in range(c.layers)))
-    grid.add_row(
-        "",
-        *(
-            Text(" ".join(f"K{h + 1} V{h + 1}" for h in range(c.kv_heads)), style=viz.FAINT)
-            for _ in range(c.layers)
-        ),
-    )
+    grid.add_row("", *(Text(heads, style=viz.FAINT) for _ in range(c.layers)))
     for i, token in enumerate(shown):
         pos = offset + i
         if pos >= cached and pos != newest:
             continue  # not in the cache yet
         fresh = pos == newest or (phase == "prefill" and pos < cached)
         color = viz.AMBER if fresh else viz.ACCENT
-        cells = Text(" ".join(" ■ " + " ■ " for _ in range(c.kv_heads)), style=color)
+        cells = Text(" ".join(square for _ in range(c.kv_heads)), style=color)
         grid.add_row(Text(label(tok, token), style="bold" if fresh else ""), *([cells] * c.layers))
     head = Text.assemble((phase, f"bold {viz.AMBER}"), ("   ", ""), (what, viz.FAINT))
     return Group(head, Text(""), grid)

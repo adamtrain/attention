@@ -103,6 +103,24 @@ def signed_cells(values: np.ndarray, scale: float, width: int = 2) -> Text:
     return cells(values, (SIGNED.diverging(v, scale) for v in values), width)
 
 
+def fitted(colors: Iterable[str], room: int) -> Text:
+    """A row of colors, one to a character; or two, the character split down the middle (▌),
+    if there isn't room for one each."""
+    colors = list(colors)
+    text = Text(no_wrap=True)
+    if len(colors) <= room:
+        for color in colors:
+            text.append(" ", style(bg=color))
+        return text
+    for left, right in zip(colors[::2], [*colors[1::2], None], strict=False):
+        text.append("▌", style(left, right))
+    return text
+
+
+def signed_fitted(values: np.ndarray, scale: float, room: int) -> Text:
+    return fitted((SIGNED.diverging(v, scale) for v in values), room)
+
+
 def blocks(matrix: np.ndarray, color, width: int = 1) -> list[Text]:
     """A dense heatmap, two rows of the matrix per line of text (using ▀ half blocks).
 
