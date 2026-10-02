@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -11,8 +13,9 @@ from .corpus import VOCAB, Corpus, Dataset
 from .model import Array, Config, Transformer, cross_entropy, groups, part
 
 PASSES = 16  # how many times, on average, pretraining reads each token of its text
-STEPS = (600, 3600)  # the fewest and most steps it will take: the most, about 9 minutes
+STEPS = (600, 3600)  # the fewest and most steps it will take: the most, about 4 minutes
 BATCH = 16  # stretches of text per step
+SHARE = 4  # stretches each core takes at a time, when a step's batch is split between cores
 CONTEXT = 128  # tokens per stretch, and the most the model can read at once
 LEARNING_RATE = 0.01
 WARMUP = 100  # steps to ramp the learning rate up from almost nothing
@@ -21,6 +24,8 @@ CLIP = 1.0  # the largest a step's whole gradient may be, measured as one long v
 EVAL = 48  # held-back stretches to measure progress on
 
 type Batches = Callable[[np.random.Generator], tuple[Array, Array]]
+
+CORES = ThreadPoolExecutor(os.cpu_count())  # its threads start only when there's work for them
 
 
 class Adam:
@@ -81,6 +86,38 @@ def clip(grads: dict[str, Array], most: float) -> tuple[dict[str, Array], float]
     if size <= most:
         return grads, size
     return {k: g * (most / size) for k, g in grads.items()}, size
+
+
+def gradients(model: Transformer, inputs: Array, targets: Array) -> tuple[float, dict[str, Array]]:
+    """A batch's loss and the gradient for every weight, worked out on several cores at once.
+
+    Nothing passes between one stretch of text and another on the way through the model, so
+    the batch can be dealt out, SHARE stretches at a time. Each core runs its share forward
+    and backward (NumPy's arithmetic doesn't hold Python's lock, so they really do run at the
+    same time), and the gradients are added up. A share counts for as much as it has targets,
+    which makes the total the gradient of the whole batch's average loss.
+
+    The batch is dealt the same way however many cores there are, and added up in the same
+    order, so the same seed makes the same model on any computer.
+    """
+    total = (targets >= 0).sum()
+    cuts = [slice(i, i + SHARE) for i in range(0, len(inputs), SHARE)]
+
+    def share(cut: slice) -> tuple[float, dict[str, Array]]:
+        weight = float((targets[cut] >= 0).sum() / total)
+        trace = model.forward(inputs[cut])
+        loss, dlogits = cross_entropy(trace.logits, targets[cut])
+        grads, _ = model.backward(trace, dlogits * weight)
+        return loss * weight, grads
+
+    # A share with nothing to learn from has no average loss to take.
+    shares = list(CORES.map(share, [cut for cut in cuts if (targets[cut] >= 0).any()]))
+    loss, grads = shares[0]
+    for more, extra in shares[1:]:
+        loss += more
+        for name, g in extra.items():
+            grads[name] += g
+    return loss, grads
 
 
 @dataclass(slots=True)
@@ -154,9 +191,7 @@ class Trainer:
 
     def step(self) -> Step:
         inputs, targets = self.batch()
-        trace = self.model.forward(inputs)
-        loss, dlogits = cross_entropy(trace.logits, targets)
-        grads, _ = self.model.backward(trace, dlogits)
+        loss, grads = gradients(self.model, inputs, targets)
         clipped, size = clip(grads, self.most)
         lr = self.learning_rate()
         moved = self.optimizer.step(self.model.params, clipped, lr)
@@ -191,15 +226,16 @@ def prepare(
     return Trainer(model, data, np.random.default_rng([seed, 2]), steps=steps)
 
 
-def evaluate(model: Transformer, inputs: Array, targets: Array, batch: int = 16) -> float:
-    """The average loss over some text, a few stretches at a time."""
-    total, count = 0.0, 0
-    for i in range(0, len(inputs), batch):
+def evaluate(model: Transformer, inputs: Array, targets: Array, batch: int = SHARE) -> float:
+    """The average loss over some text, a few stretches at a time, on several cores at once."""
+
+    def some(i: int) -> tuple[float, int]:
         logits = model.forward(inputs[i : i + batch]).logits
         n = int((targets[i : i + batch] >= 0).sum())
-        total += cross_entropy(logits, targets[i : i + batch])[0] * n
-        count += n
-    return total / max(count, 1)
+        return cross_entropy(logits, targets[i : i + batch])[0] * n if n else 0.0, n
+
+    totals = list(CORES.map(some, range(0, len(inputs), batch)))
+    return sum(loss for loss, _ in totals) / max(sum(n for _, n in totals), 1)
 
 
 def smooth(values: list[float], alpha: float = 0.05) -> list[float]:

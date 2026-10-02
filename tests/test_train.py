@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from attention.corpus import Dataset, built_in
+from attention.model import cross_entropy
 from attention.train import (
     CONTEXT,
     STEPS,
@@ -9,6 +10,7 @@ from attention.train import (
     baselines,
     clip,
     evaluate,
+    gradients,
     prepare,
     smooth,
     steps_for,
@@ -50,6 +52,22 @@ def test_steps_report_what_moved_and_how_big_the_gradient_was():
     assert list(sizes) == ["embeddings", "layer 1", "layer 2", "final norm"]
     assert all(n > 0 for n in sizes.values())
     assert step.size == pytest.approx(np.sqrt(sum(s * s for s in sizes.values())))
+
+
+def test_a_batch_split_between_cores_has_the_same_gradient():
+    trainer = small_trainer(steps=1)
+    inputs, targets = trainer.batch()
+    targets = targets.copy()
+    targets[:5, :40] = -1  # shares with different numbers of targets, as in chat fine-tuning
+    targets[8:12] = -1  # and one with none at all
+    trace = trainer.model.forward(inputs)
+    loss, dlogits = cross_entropy(trace.logits, targets)
+    whole, _ = trainer.model.backward(trace, dlogits)
+    split_loss, split = gradients(trainer.model, inputs, targets)
+    assert split_loss == pytest.approx(loss)
+    assert list(split) == list(whole)
+    for name, grad in whole.items():
+        np.testing.assert_allclose(split[name], grad, atol=1e-12)
 
 
 def test_clipping_shortens_a_long_gradient_without_turning_it():
